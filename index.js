@@ -4,4 +4,6 @@
  *
  */
 
-module.exports = require('./lib/');
+var mongoose = require('./lib/');
+mongoose.Promise = global.Promise;
+module.exports = mongoose;

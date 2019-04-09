@@ -842,10 +842,10 @@ describe('schema', function() {
           assert.ok(error);
           assert.ok(error.errors['foods.0']);
           assert.equal(error.errors['foods.0'].message,
-            '`tofu` is not a valid enum value for path `foods`.');
+            '`tofu` is not a valid enum value for path `foods.0`.');
           assert.ok(error.errors['foods.1']);
           assert.equal(error.errors['foods.1'].message,
-            '`waffles` is not a valid enum value for path `foods`.');
+            '`waffles` is not a valid enum value for path `foods.1`.');
           assert.ok(!error.errors['foods.2']);
 
           done();
@@ -1292,6 +1292,26 @@ describe('schema', function() {
         assert.ifError(error);
         done();
       });
+    });
+
+    it('handles function for date min/max (gh-7600)', function() {
+      const s = mongoose.Schema({
+        minDate: String,
+        date: {
+          type: Date,
+          min: function() { return this.minDate; }
+        }
+      });
+      const M = mongoose.model('gh7600', s);
+
+      let m = new M({ minDate: '2018-06-01', date: '2018-05-01' });
+      let err = m.validateSync();
+      assert.ok(err);
+      assert.ok(err.errors['date']);
+
+      m = new M({ minDate: '2018-06-01', date: '2018-07-01' });
+      err = m.validateSync();
+      assert.ifError(err);
     });
 
     it('evaluate message function gh6523', function(done) {

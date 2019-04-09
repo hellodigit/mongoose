@@ -594,4 +594,58 @@ describe('Map', function() {
       assert.equal(loaded.get('children.one.name'), 'bar');
     });
   });
+
+  it('nested maps (gh-7630)', function() {
+    const schema = new mongoose.Schema({
+      describe: {
+        type: Map,
+        of: Map,
+        default: {}
+      }
+    });
+
+    const GoodsInfo = db.model('gh7630', schema);
+
+    let goodsInfo = new GoodsInfo();
+    goodsInfo.describe = new Map();
+    goodsInfo.describe.set('brand', new Map([['en', 'Hermes']]));
+
+    return co(function*() {
+      yield goodsInfo.save();
+
+      goodsInfo = yield GoodsInfo.findById(goodsInfo);
+      assert.equal(goodsInfo.get('describe.brand.en'), 'Hermes');
+    });
+  });
+
+  it('get full path in validator with `propsParameter` (gh-7447)', function() {
+    const calls = [];
+    const schema = new mongoose.Schema({
+      myMap: {
+        type: Map,
+        of: {
+          type: String,
+          validate: {
+            validator: (v, props) => {
+              calls.push(props.path);
+              return v === 'bar';
+            },
+            propsParameter: true
+          }
+        }
+      }
+    });
+    const Model = db.model('gh7447', schema);
+
+    const doc = new Model({ myMap: { foo: 'bar' } });
+    assert.equal(calls.length, 0);
+
+    assert.ifError(doc.validateSync());
+    assert.deepEqual(calls, ['myMap.foo']);
+
+    return doc.validate().
+      then(() => {
+        assert.deepEqual(calls, ['myMap.foo', 'myMap.foo']);
+      });
+  });
 });

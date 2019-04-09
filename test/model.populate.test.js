@@ -376,7 +376,7 @@ describe('model: populate:', function() {
         assert.ifError(err);
         BlogPost
           .findById(post._id)
-          .populate('_creator', 'name', User)
+          .populate({ path: '_creator', select: 'name', model: User })
           .exec(function(err, post) {
             db2.db.dropDatabase(function() {
               db.close();
@@ -4924,6 +4924,95 @@ describe('model: populate:', function() {
           catch(done);
       });
 
+      it('with functions for match (gh-7397)', function() {
+        const ASchema = new Schema({
+          name: String,
+          createdAt: Date
+        });
+
+        const BSchema = new Schema({
+          as: [{ type: ObjectId, ref: 'gh7397_A' }],
+          minDate: Date
+        });
+
+        const A = db.model('gh7397_A', ASchema);
+        const B = db.model('gh7397_B', BSchema);
+
+        return co(function*() {
+          const as = yield A.create([
+            { name: 'old', createdAt: '2015-06-01' },
+            { name: 'newer', createdAt: '2017-06-01' },
+            { name: 'newest', createdAt: '2019-06-01' }
+          ]);
+
+          yield B.create({ as: as.map(a => a._id), minDate: '2016-01-01' });
+          const b = yield B.findOne().populate({
+            path: 'as',
+            match: doc => ({ createdAt: { $gte: doc.minDate } })
+          });
+          assert.equal(b.as.length, 2);
+          assert.deepEqual(b.as.map(a => a.name), ['newer', 'newest']);
+
+          yield B.create({ as: as.map(a => a._id), minDate: '2018-01-01' });
+          const bs = yield B.find().sort({ minDate: 1 }).populate({
+            path: 'as',
+            match: doc => ({ createdAt: { $gte: doc.minDate } })
+          });
+          assert.equal(bs[0].minDate.toString(), new Date('2016-01-01').toString());
+          assert.equal(bs[1].minDate.toString(), new Date('2018-01-01').toString());
+          assert.equal(bs[0].as.length, 2);
+          assert.deepEqual(bs[0].as.map(a => a.name), ['newer', 'newest']);
+          assert.equal(bs[1].as.length, 1);
+          assert.deepEqual(bs[1].as.map(a => a.name), ['newest']);
+        });
+      });
+
+      it('with functions for match and foreignField (gh-7397)', function() {
+        const ASchema = new Schema({
+          name: String,
+          createdAt: Date,
+          b: ObjectId,
+          b2: ObjectId
+        });
+
+        const BSchema = new Schema({
+          alternateProperty: Boolean,
+          minDate: Date
+        });
+
+        BSchema.virtual('as', {
+          ref: 'gh7397_A1',
+          localField: '_id',
+          foreignField: function() { return this.alternateProperty ? 'b2' : 'b'; },
+          options: { match: doc => ({ createdAt: { $gte: doc.minDate } }) }
+        });
+
+        const A = db.model('gh7397_A1', ASchema);
+        const B = db.model('gh7397_B1', BSchema);
+
+        return co(function*() {
+          let bs = yield B.create([
+            { minDate: '2016-01-01' },
+            { minDate: '2016-01-01', alternateProperty: true }
+          ]);
+          yield A.create([
+            { name: 'old', createdAt: '2015-06-01', b: bs[0]._id, b2: bs[1]._id },
+            { name: 'newer', createdAt: '2017-06-01', b: bs[0]._id, b2: bs[1]._id },
+            { name: 'newest', createdAt: '2019-06-01', b: bs[0]._id, b2: bs[1]._id }
+          ]);
+
+          bs = yield B.find().sort({ minDate: 1 }).populate('as');
+
+          let b = bs[0];
+          assert.equal(b.as.length, 2);
+          assert.deepEqual(b.as.map(a => a.name).sort(), ['newer', 'newest']);
+
+          b = bs[1];
+          assert.equal(b.as.length, 2);
+          assert.deepEqual(b.as.map(a => a.name).sort(), ['newer', 'newest']);
+        });
+      });
+
       it('with function for refPath (gh-6669)', function() {
         const connectionSchema = new Schema({
           destination: String
@@ -7985,6 +8074,50 @@ describe('model: populate:', function() {
     });
   });
 
+  it('count with deeply nested (gh-7573)', function() {
+    const s1 = new mongoose.Schema({});
+
+    s1.virtual('s2', {
+      ref: 'gh7573_s2',
+      localField: '_id',
+      foreignField: 's1'
+    });
+
+    const s2 = new mongoose.Schema({
+      s1: {type: mongoose.Schema.Types.ObjectId, ref: 'schema1'}
+    });
+
+    s2.virtual('numS3', {
+      ref: 'gh7573_s3',
+      localField: '_id',
+      foreignField: 's2',
+      count: true
+    });
+
+    const s3 = new mongoose.Schema({
+      s2: {type: mongoose.Schema.Types.ObjectId, ref: 'schema2'}
+    });
+
+    return co(function*() {
+      const S1 = db.model('gh7573_s1', s1);
+      const S2 = db.model('gh7573_s2', s2);
+      const S3 = db.model('gh7573_s3', s3);
+
+      const s1doc = yield S1.create({});
+      const s2docs = yield S2.create([{ s1: s1doc }, { s1: s1doc }]);
+      yield S3.create([{ s2: s2docs[0] }, { s2: s2docs[0] }, { s2: s2docs[1] }]);
+
+      const doc = yield S1.findOne({}).populate({
+        path: 's2',
+        populate: {
+          path: 'numS3'
+        }
+      });
+
+      assert.deepEqual(doc.s2.map(s => s.numS3).sort(), [1, 2]);
+    });
+  });
+
   it('explicit model option overrides refPath (gh-7273)', function() {
     const userSchema = new Schema({ name: String });
     const User1 = db.model('gh7273_User_1', userSchema);
@@ -8135,6 +8268,39 @@ describe('model: populate:', function() {
       yield doc.execPopulate();
       assert.equal(doc.arr1[0].arr2[0].item.name, 'item1');
       assert.equal(doc.arr1[0].arr2[1].item.name, 'item2');
+    });
+  });
+
+  it('handles populating deeply nested path if value in db is a primitive (gh-7545)', function() {
+    const personSchema = new Schema({ _id: Number, name: String });
+    const PersonModel = db.model('gh7545_People', personSchema);
+
+    // Create Event Model
+    const teamSchema = new Schema({
+      nested: { members: [{ type: Number, ref: 'gh7545_People' }] }
+    });
+    const eventSchema = new Schema({
+      _id: Number,
+      title: String,
+      teams: [teamSchema]
+    });
+    const EventModel = db.model('gh7545_Event', eventSchema);
+
+    return co(function*() {
+      yield PersonModel.create({ _id: 1, name: 'foo' });
+      yield EventModel.collection.insertMany([
+        { _id: 2, title: 'Event 1', teams: false },
+        { _id: 3, title: 'Event 2', teams: [{ nested: { members: [1] } }] }
+      ]);
+
+      const docs = yield EventModel.find().
+        sort({ _id: 1 }).
+        lean().
+        populate('teams.nested.members');
+      assert.strictEqual(docs[0].teams, false);
+
+      assert.equal(docs[1].teams.length, 1);
+      assert.deepEqual(docs[1].teams[0].nested.members.map(m => m.name), ['foo']);
     });
   });
 });

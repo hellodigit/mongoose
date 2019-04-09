@@ -102,6 +102,21 @@ describe('Query', function() {
     });
   });
 
+  describe('projection() (gh-7384)', function() {
+    it('gets current projection', function() {
+      const query = new Query({}, {}, null, p1.collection);
+      query.select('a');
+      assert.deepEqual(query.projection(), { a: 1 });
+    });
+
+    it('overwrites current projection', function() {
+      const query = new Query({}, {}, null, p1.collection);
+      query.select('a');
+      assert.deepEqual(query.projection({ b: 1 }), { b: 1 });
+      assert.deepEqual(query.projection(), { b: 1 });
+    });
+  });
+
   describe('where', function() {
     it('works', function(done) {
       const query = new Query({}, {}, null, p1.collection);
@@ -3367,6 +3382,22 @@ describe('Query', function() {
       () => { throw new Error('Should have failed'); },
       err => assert.ok(err.message.indexOf('updateOne') !== -1)
     );
+  });
+
+  it('sets deletedCount on result of remove() (gh-7629)', function() {
+    const schema = new Schema({ name: String });
+
+    const Model = db.model('gh7629', schema);
+
+    return co(function*() {
+      yield Model.create({ name: 'foo' });
+
+      let res = yield Model.remove({});
+      assert.equal(res.deletedCount, 1);
+
+      res = yield Model.remove({});
+      assert.strictEqual(res.deletedCount, 0);
+    });
   });
 
   describe('merge()', function() {

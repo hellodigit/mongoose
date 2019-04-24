@@ -7215,6 +7215,100 @@ describe('document', function() {
     return Promise.resolve();
   });
 
+  it('overwriting single nested (gh-7660)', function() {
+    const childSchema = new mongoose.Schema({
+      foo: String,
+      bar: Number
+    }, { _id: false, id: false });
+
+    const parentSchema = new mongoose.Schema({
+      child: childSchema
+    });
+    const Test = db.model('gh7660', parentSchema);
+
+    const test = new Test({
+      child: {
+        foo: 'test',
+        bar: 42
+      }
+    });
+
+    test.set({
+      child: {
+        foo: 'modified',
+        bar: 43
+      }
+    });
+
+    assert.deepEqual(test.toObject().child, {
+      foo: 'modified',
+      bar: 43
+    });
+
+    return Promise.resolve();
+  });
+
+  it('setting path to non-POJO object (gh-7639)', function() {
+    class Nested {
+      constructor(prop) {
+        this.prop = prop;
+      }
+    }
+
+    const schema = new Schema({ nested: { prop: String } });
+    const Model = db.model('gh7639', schema);
+
+    const doc = new Model({ nested: { prop: '1' } });
+
+    doc.set('nested', new Nested('2'));
+    assert.equal(doc.nested.prop, '2');
+
+    doc.set({ nested: new Nested('3') });
+    assert.equal(doc.nested.prop, '3');
+  });
+
+  it('handles .set() on doc array within embedded discriminator (gh-7656)', function() {
+    const pageElementSchema = new Schema({
+      type: { type: String, required: true }
+    }, { discriminatorKey: 'type' });
+
+    const textElementSchema = new Schema({
+      body: { type: String }
+    });
+
+    const blockElementSchema = new Schema({
+      elements: [pageElementSchema]
+    });
+
+    blockElementSchema.path('elements').discriminator('block', blockElementSchema);
+    blockElementSchema.path('elements').discriminator('text', textElementSchema);
+
+    const pageSchema = new Schema({ elements: [pageElementSchema] });
+
+    pageSchema.path('elements').discriminator('block', blockElementSchema);
+    pageSchema.path('elements').discriminator('text', textElementSchema);
+
+    const Page = db.model('gh7656', pageSchema);
+    const page = new Page({
+      elements: [
+        { type: 'text', body: 'Page Title' },
+        { type: 'block', elements: [{ type: 'text', body: 'Page Content' }] }
+      ]
+    });
+
+    page.set('elements.0.body', 'Page Heading');
+    assert.equal(page.elements[0].body, 'Page Heading');
+    assert.equal(page.get('elements.0.body'), 'Page Heading');
+
+    page.set('elements.1.elements.0.body', 'Page Body');
+    assert.equal(page.elements[1].elements[0].body, 'Page Body');
+    assert.equal(page.get('elements.1.elements.0.body'), 'Page Body');
+
+    page.elements[1].elements[0].body = 'Page Body';
+    assert.equal(page.elements[1].elements[0].body, 'Page Body');
+    assert.equal(page.get('elements.1.elements.0.body'), 'Page Body');
+  });
+
   it('$isEmpty() (gh-5369)', function() {
     const schema = new Schema({
       nested: { foo: String },
@@ -7266,6 +7360,37 @@ describe('document', function() {
 
     doc.mixed.test = 1;
     assert.ok(!doc.$isEmpty('mixed'));
+
+    return Promise.resolve();
+  });
+
+  it('push() onto discriminator doc array (gh-7704)', function() {
+    const opts = {
+      minimize: false, // So empty objects are returned
+      strict: true,
+      typeKey: '$type', // So that we can use fields named `type`
+      discriminatorKey: 'type',
+    };
+
+    const IssueSchema = new mongoose.Schema({
+      _id: String,
+      text: String,
+      type: String,
+    }, opts);
+
+    const IssueModel = mongoose.model('gh7704', IssueSchema);
+
+    const SubIssueSchema = new mongoose.Schema({
+      checklist: [{
+        completed: {$type: Boolean, default: false},
+      }]
+    }, opts);
+    IssueModel.discriminator('gh7704_sub', SubIssueSchema);
+
+    const doc = new IssueModel({ _id: 'foo', text: 'text', type: 'gh7704_sub' });
+    doc.checklist.push({ completed: true });
+
+    assert.ifError(doc.validateSync());
 
     return Promise.resolve();
   });

@@ -5,7 +5,7 @@
 
 'use strict';
 
-const assert = require('power-assert');
+const assert = require('assert');
 const start = require('./common');
 const mongoose = start.mongoose;
 const EmbeddedDocument = require('../lib/types/embedded');
@@ -37,7 +37,7 @@ describe('types.document', function() {
 
     function _Subdocument() {
       const arr = new DocumentArray;
-      arr._path = 'jsconf.ar';
+      arr.$path = () => 'jsconf.ar';
       arr.$parent = () => new Dummy;
       arr[0] = this;
       EmbeddedDocument.call(this, {}, arr);

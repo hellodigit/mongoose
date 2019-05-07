@@ -68,7 +68,7 @@ describe('types.documentarray', function() {
     assert.ok(a.isMongooseDocumentArray);
     assert.ok(Array.isArray(a));
 
-    assert.deepEqual(a._atomics.constructor, Object);
+    assert.deepEqual(a.$atomics().constructor, Object);
 
     done();
   });
@@ -382,6 +382,34 @@ describe('types.documentarray', function() {
 
       assert.ok(m.validateSync().errors['docs.0.name']);
       done();
+    });
+
+    it('reports validation errors with correct index path (gh-7724)', function() {
+      const parentSchema = new Schema({
+        name: String,
+        children: [{
+          name: { type: String, required: true },
+          gender: { type: String, required: true }
+        }]
+      });
+
+      const Parent = mongoose.model('gh7724', parentSchema);
+
+      const p = new Parent({
+        name: 'Eddard Stark',
+        children: [{ name: 'Arya Stark', gender: 'F'}]
+      });
+
+      p.children.push({ name: 'Sansa Stark' });
+      p.children.push({ gender: 'M' });
+      p.children.push({ name: 'Bran Stark', gender: 'M' });
+      p.children.push({ name: 'Jon Snow' });
+
+      const error = p.validateSync();
+      assert.ok(error);
+      assert.ok(error.errors);
+      assert.deepStrictEqual(
+        Object.keys(error.errors), ['children.1.gender', 'children.2.name', 'children.4.gender']);
     });
   });
 

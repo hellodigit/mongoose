@@ -52,7 +52,16 @@ describe('types array', function() {
     assert.ok(a.isMongooseArray);
     assert.equal(Array.isArray(a), true);
 
-    assert.deepEqual(a._atomics.constructor, Object);
+    assert.deepEqual(a.$atomics().constructor, Object);
+    done();
+  });
+
+  it('is `deepEqual()` another array (gh-7700)', function(done) {
+    const Test = db.model('gh7700', new Schema({ arr: [String] }));
+    const doc = new Test({ arr: ['test'] });
+
+    assert.deepEqual(doc.arr, new MongooseArray(['test']));
+
     done();
   });
 
@@ -112,6 +121,47 @@ describe('types array', function() {
               assert.equal(user.pets.indexOf(tobi._id), 0);
               assert.equal(user.pets.indexOf(loki._id), 1);
               assert.equal(user.pets.indexOf(jane._id), 2);
+              done();
+            });
+          });
+        });
+      }
+
+      [tobi, loki, jane].forEach(function(pet) {
+        pet.save(function() {
+          --pending || cb();
+        });
+      });
+    });
+  });
+
+  describe('includes()', function() {
+    it('works', function(done) {
+      const User = db.model('User', 'users_' + random());
+      const Pet = db.model('Pet', 'pets' + random());
+
+      const tj = new User({name: 'tj'});
+      const tobi = new Pet({name: 'tobi'});
+      const loki = new Pet({name: 'loki'});
+      const jane = new Pet({name: 'jane'});
+
+      tj.pets.push(tobi);
+      tj.pets.push(loki);
+      tj.pets.push(jane);
+
+      let pending = 3;
+
+      function cb() {
+        Pet.find({}, function(err) {
+          assert.ifError(err);
+          tj.save(function(err) {
+            assert.ifError(err);
+            User.findOne({name: 'tj'}, function(err, user) {
+              assert.ifError(err);
+              assert.equal(user.pets.length, 3);
+              assert.equal(user.pets.includes(tobi.id), true);
+              assert.equal(user.pets.includes(loki.id), true);
+              assert.equal(user.pets.includes(jane.id), true);
               done();
             });
           });
@@ -798,7 +848,7 @@ describe('types array', function() {
           color = doc.colors.$pop();
           assert.equal(color, undefined);
           assert.equal(doc.colors.length, 2);
-          assert.ok(!('$set' in doc.colors._atomics), 'invalid $atomic op used');
+          assert.ok(!('$set' in doc.colors.$atomics()), 'invalid $atomic op used');
           doc.save(function(err) {
             assert.equal(err, null);
             const color = doc.colors.$pop();

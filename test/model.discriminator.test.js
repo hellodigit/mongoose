@@ -529,6 +529,33 @@ describe('model', function() {
           });
       });
 
+      it('embedded discriminator with numeric type (gh-7808)', function() {
+        const typesSchema = Schema({
+          type: { type: Number }
+        }, { discriminatorKey:'type',_id:false });
+
+        const mainSchema = Schema({
+          types:[typesSchema]
+        });
+
+        mainSchema.path('types').discriminator(1,
+          Schema({ foo: { type: String, default: 'bar' } }));
+        mainSchema.path('types').discriminator(2,
+          Schema({ hello: { type: String, default: 'world' } }));
+
+        const Model = db.model('gh7808', mainSchema);
+
+        return co(function*() {
+          yield Model.create({
+            types: [{ type: 1 }, { type: 2 }]
+          });
+          const fromDb = yield Model.collection.findOne();
+          assert.equal(fromDb.types.length, 2);
+          assert.equal(fromDb.types[0].foo, 'bar');
+          assert.equal(fromDb.types[1].hello, 'world');
+        });
+      });
+
       it('supports clone() (gh-4983)', function(done) {
         var childSchema = new Schema({
           name: String
@@ -1325,6 +1352,26 @@ describe('model', function() {
       const doc = new BaseModel({ kind: 'gh7586_Child', name: 'a', test: 'b' });
       assert.ok(doc instanceof ChildModel);
       assert.equal(doc.test, 'b');
+    });
+
+    it('allows setting custom discriminator key in schema (gh-7807)', function() {
+      const eventSchema = Schema({
+        title: String,
+        kind: { type: String, required: true }
+      }, { discriminatorKey: 'kind' });
+      
+      const Event = db.model('gh7807', eventSchema);
+      const Clicked = Event.discriminator('gh7807_Clicked',
+        Schema({ url: String }));
+
+      const doc = new Event({ title: 'foo' });
+
+      return doc.validate().then(() => assert.ok(false), err => {
+        assert.ok(err);
+        assert.ok(err.errors['kind']);
+        assert.ok(err.errors['kind'].message.indexOf('required') !== -1,
+          err.errors['kind'].message);
+      });
     });
 
     it('does not project in embedded discriminator key if it is the only selected field (gh-7574)', function() {

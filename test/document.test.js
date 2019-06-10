@@ -4964,6 +4964,47 @@ describe('document', function() {
       done();
     });
 
+    it('Disallows writing to __proto__ and other special properties', function(done) {
+      var schema = new mongoose.Schema({
+        name: String
+      }, { strict: false });
+
+      var Model = db.model('prototest', schema);
+      var doc = new Model({ '__proto__.x': 'foo' });
+
+      assert.strictEqual(Model.x, void 0);
+      doc.set('__proto__.y', 'bar');
+
+      assert.strictEqual(Model.y, void 0);
+
+      doc.set('constructor.prototype.z', 'baz');
+
+      assert.strictEqual(Model.z, void 0);
+
+      done();
+    });
+
+    it('Handles setting populated path set via `Document#populate()` (gh-7302)', function() {
+      var authorSchema = new Schema({ name: String });
+      var bookSchema = new Schema({
+        author: { type: mongoose.Schema.Types.ObjectId, ref: 'gh7302_Author' }
+      });
+
+      var Author = db.model('gh7302_Author', authorSchema);
+      var Book = db.model('gh7302_Book', bookSchema);
+
+      return Author.create({ name: 'Victor Hugo' }).
+        then(function(author) { return Book.create({ author: author._id }); }).
+        then(function() { return Book.findOne(); }).
+        then(function(doc) { return doc.populate('author').execPopulate(); }).
+        then(function(doc) {
+          doc.author = {};
+          assert.ok(!doc.author.name);
+          assert.ifError(doc.validateSync());
+        });
+    });
+
+
     it('Single nested subdocs using discriminator can be modified (gh-5693)', function(done) {
       var eventSchema = new Schema({ message: String }, {
         discriminatorKey: 'kind',

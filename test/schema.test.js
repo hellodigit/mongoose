@@ -406,6 +406,13 @@ describe('schema', function() {
       assert.ok(mixed[4] instanceof Date);
       assert.ok(mixed[5] instanceof DocumentObjectId);
 
+      // gh-6405
+      assert.ok(Loki.path('dates.$') instanceof SchemaTypes.Date);
+      assert.ok(Loki.path('numbers.$') instanceof SchemaTypes.Number);
+      assert.ok(Loki.path('strings.$') instanceof SchemaTypes.String);
+      assert.ok(Loki.path('buffers.$') instanceof SchemaTypes.Buffer);
+      assert.ok(Loki.path('mixed.$') instanceof SchemaTypes.Mixed);
+
       done();
     });
 
@@ -1200,8 +1207,15 @@ describe('schema', function() {
 
     it('returns the schema instance', function() {
       const schema = new Schema({ name: String });
-      const ret = schema.clone().add({ age: Number });
-      assert.ok(ret instanceof Schema);
+      const ret = schema.add({ age: Number });
+      assert.strictEqual(ret, schema);
+    });
+
+    it('returns the schema instance when schema instance is passed', function() {
+      const schemaA = new Schema({ name: String });
+      const schemaB = new Schema({ age: Number });
+      const ret = schemaB.add(schemaA);
+      assert.strictEqual(ret, schemaB);
     });
 
     it('merging nested objects (gh-662)', function(done) {
@@ -1280,13 +1294,13 @@ describe('schema', function() {
     } catch (e) {
       err = e;
     }
-    assert.equal(err.message, 'Invalid value for schema path `name.first`');
+    assert.ok(err.message.indexOf('Invalid value for schema path `name.first`') !== -1, err.message);
     try {
       new Schema({ age: undefined });
     } catch (e) {
       err = e;
     }
-    assert.equal(err.message, 'Invalid value for schema path `age`');
+    assert.ok(err.message.indexOf('Invalid value for schema path `age`') !== -1, err.message);
     done();
   });
 
@@ -1899,6 +1913,60 @@ describe('schema', function() {
         assert.equal(otherSchema.childSchemas.length, 1);
         assert.ok(otherSchema.childSchemas[0].schema.path('l3'));
       });
+
+      it('copies single embedded discriminators (gh-7894)', function() {
+        const colorSchema = new Schema({}, { discriminatorKey: 'type' });
+        colorSchema.methods.isYellow = () => false;
+
+        const yellowSchema = new Schema();
+        yellowSchema.methods.isYellow = () => true;
+
+        const fruitSchema = new Schema({}, { discriminatorKey: 'type' });
+
+        const bananaSchema = new Schema({ color: { type: colorSchema } });
+        bananaSchema.path('color').discriminator('yellow', yellowSchema);
+        bananaSchema.methods.isYellow = function() { return this.color.isYellow(); };
+
+        const schema = new Schema({ fruits: [fruitSchema] });
+
+        const clone = bananaSchema.clone();
+        schema.path('fruits').discriminator('banana', clone);
+        assert.ok(clone.path('color').caster.discriminators);
+
+        const Basket = db.model('gh7894', schema);
+        const b = new Basket({
+          fruits: [
+            {
+              type: 'banana',
+              color: { type: 'yellow' }
+            }
+          ]
+        });
+
+        assert.ok(b.fruits[0].isYellow());
+      });
+
+      it('copies array discriminators (gh-7954)', function() {
+        const eventSchema = Schema({ message: String }, {
+          discriminatorKey: 'kind',
+          _id: false
+        });
+
+        const batchSchema = Schema({ events: [eventSchema] }, {
+          _id: false
+        });
+
+        const docArray = batchSchema.path('events');
+        docArray.discriminator('gh7954_Clicked',
+          Schema({ element: String }, { _id: false }));
+        docArray.discriminator('gh7954_Purchased',
+          Schema({ product: String }, { _id: false }));
+
+        const clone = batchSchema.clone();
+        assert.ok(clone.path('events').Constructor.discriminators);
+        assert.ok(clone.path('events').Constructor.discriminators['gh7954_Clicked']);
+        assert.ok(clone.path('events').Constructor.discriminators['gh7954_Purchased']);
+      });
     });
 
     it('TTL index with timestamps (gh-5656)', function(done) {
@@ -1988,5 +2056,92 @@ describe('schema', function() {
     assert.equal(otherSchema.options._id, true);
 
     return Promise.resolve();
+  });
+
+  it('schema.pathType() with positional path that isnt in schema (gh-7935)', function() {
+    const subdocSchema = Schema({
+      list: { type: [String], default: ['a'] }
+    }, { minimize: false });
+    const testSchema = Schema({
+      lists: subdocSchema
+    });
+
+    assert.strictEqual(testSchema.pathType('subpaths.list.0.options'),
+      'adhocOrUndefined');
+  });
+
+  it('supports pre(Array, Function) and post(Array, Function) (gh-7803)', function() {
+    const schema = Schema({ name: String });
+    schema.pre(['save', 'remove'], testMiddleware);
+    function testMiddleware() {
+      console.log('foo');
+    }
+
+    assert.equal(schema.s.hooks._pres.get('save').length, 1);
+    assert.equal(schema.s.hooks._pres.get('save')[0].fn, testMiddleware);
+    assert.equal(schema.s.hooks._pres.get('remove').length, 1);
+    assert.equal(schema.s.hooks._pres.get('remove')[0].fn, testMiddleware);
+
+    schema.post(['save', 'remove'], testMiddleware);
+    assert.equal(schema.s.hooks._posts.get('save').length, 1);
+    assert.equal(schema.s.hooks._posts.get('save')[0].fn, testMiddleware);
+    assert.equal(schema.s.hooks._posts.get('remove').length, 1);
+    assert.equal(schema.s.hooks._posts.get('remove')[0].fn, testMiddleware);
+  });
+
+  it('supports array with { type: ObjectID } (gh-8034)', function() {
+    const schema = Schema({ testId: [{ type: 'ObjectID' }] });
+    const path = schema.path('testId');
+    assert.ok(path);
+    assert.ok(path.caster instanceof Schema.ObjectId);
+  });
+
+  it('supports getting path under array (gh-8057)', function() {
+    const schema = new Schema({ arr: [{ name: String }] });
+    assert.ok(schema.path('arr.name') instanceof SchemaTypes.String);
+    assert.ok(schema.path('arr.0.name') instanceof SchemaTypes.String);
+  });
+
+  it('required paths with clone() (gh-8111)', function() {
+    const schema = Schema({ field: { type: String, required: true } });
+    const Model = db.model('gh8111', schema.clone());
+
+    const doc = new Model({});
+
+    return doc.validate().then(() => assert.ok(false), err => {
+      assert.ok(err);
+      assert.ok(err.errors['field']);
+    });
+  });
+
+  it('getters/setters with clone() (gh-8124)', function() {
+    const schema = new mongoose.Schema({
+      field: {type: String, required: true}
+    });
+
+    schema.path('field').set(value => value ? value.toUpperCase() : value);
+
+    const TestKo = db.model('gh8124', schema.clone());
+
+    const testKo = new TestKo({field: 'upper'});
+    assert.equal(testKo.field, 'UPPER');
+  });
+
+  it('required with nullish value (gh-8219)', function() {
+    const schema = Schema({
+      name: { type: String, required: void 0 },
+      age: { type: Number, required: null }
+    });
+    assert.strictEqual(schema.path('name').isRequired, false);
+    assert.strictEqual(schema.path('age').isRequired, false);
+  });
+
+  it('SchemaStringOptions line up with schema/string (gh-8256)', function() {
+    const SchemaStringOptions = require('../lib/options/SchemaStringOptions');
+    const keys = Object.keys(SchemaStringOptions.prototype).
+      filter(key => key !== 'constructor');
+    const functions = Object.keys(Schema.Types.String.prototype).
+      filter(key => ['constructor', 'cast', 'castForQuery', 'checkRequired'].indexOf(key) === -1);
+    assert.deepEqual(keys.sort(), functions.sort());
   });
 });

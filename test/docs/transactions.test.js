@@ -21,7 +21,8 @@ describe('transactions', function() {
     return db.
       then(() => {
         // Skip if not a repl set
-        if (db.client.topology.constructor.name !== 'ReplSet') {
+        if (db.client.topology.constructor.name !== 'ReplSet' &&
+            !db.client.topology.s.description.type.includes('ReplicaSet')) {
           _skipped = true;
           this.skip();
 
@@ -76,6 +77,21 @@ describe('transactions', function() {
       then(() => session.commitTransaction()).
       then(() => Customer.findOne({ name: 'Test' })).
       then(doc => assert.ok(doc));
+  });
+
+  it('withTransaction', function() {
+    // acquit:ignore:start
+    const Customer = db.model('Customer_withTrans', new Schema({ name: String }));
+    // acquit:ignore:end
+    return Customer.createCollection().
+      then(() => Customer.startSession()).
+      // The `withTransaction()` function's first parameter is a function
+      // that returns a promise.
+      then(session => session.withTransaction(() => {
+        return Customer.create([{ name: 'Test' }], { session: session });
+      })).
+      then(() => Customer.countDocuments()).
+      then(count => assert.strictEqual(count, 1));
   });
 
   it('abort', function() {
@@ -276,7 +292,7 @@ describe('transactions', function() {
     });
   });
 
-  it('deleteMany (gh-6805)', function() {
+  it('deleteOne and deleteMany (gh-7857)(gh-6805)', function() {
     const Character = db.model('Character', new Schema({ name: String }), 'Character');
 
     let session = null;
@@ -293,9 +309,10 @@ describe('transactions', function() {
         ], { session: session });
       }).
       then(() => Character.deleteMany({ name: /Lannister/ }, { session: session })).
+      then(() => Character.deleteOne({ name: 'Jon Snow' }, { session: session })).
       then(() => Character.find({}).session(session)).
       then(res => {
-        assert.equal(res.length, 2);
+        assert.equal(res.length, 1);
         session.commitTransaction();
       });
   });

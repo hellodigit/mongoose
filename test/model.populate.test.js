@@ -4,9 +4,7 @@
  * Test dependencies.
  */
 
-const _ = require('lodash');
 const assert = require('assert');
-const async = require('async');
 const co = require('co');
 const start = require('./common');
 const utils = require('../lib/utils');
@@ -3841,7 +3839,7 @@ describe('model: populate:', function() {
         });
         query.exec(function(error, doc) {
           assert.ifError(error);
-          const arr = _.map(doc.toObject().team.members, function(v) {
+          const arr = doc.toObject().team.members.map(function(v) {
             return v.name;
           });
           assert.deepEqual(arr, ['Shaq', 'Kobe', 'Horry']);
@@ -3910,7 +3908,7 @@ describe('model: populate:', function() {
           assert.ifError(error);
           const players = doc.toObject().teams[0].members.
             concat(doc.toObject().teams[1].members);
-          const arr = _.map(players, function(v) {
+          const arr = players.map(function(v) {
             return v.name;
           });
           assert.deepEqual(arr,
@@ -4036,7 +4034,7 @@ describe('model: populate:', function() {
       });
     });
 
-    it('out-of-order discriminators (gh-4073)', function(done) {
+    it('out-of-order discriminators (gh-4073)', function() {
       const UserSchema = new Schema({
         name: String
       });
@@ -4095,54 +4093,23 @@ describe('model: populate:', function() {
       const be2 = new BlogPostEvent({ blogpost: b2 });
       const be3 = new BlogPostEvent({ blogpost: b3 });
 
-      async.series(
-        [
-          u1.save.bind(u1),
-          u2.save.bind(u2),
-          u3.save.bind(u3),
+      const docs = [u1, u2, u3, c1, c2, c3, b1, b2, b3, ce1, ue1, be1, ce2, ue2, be2, ce3, ue3, be3];
 
-          c1.save.bind(c1),
-          c2.save.bind(c2),
-          c3.save.bind(c3),
-
-          b1.save.bind(b1),
-          b2.save.bind(b2),
-          b3.save.bind(b3),
-
-          ce1.save.bind(ce1),
-          ue1.save.bind(ue1),
-          be1.save.bind(be1),
-
-          ce2.save.bind(ce2),
-          ue2.save.bind(ue2),
-          be2.save.bind(be2),
-
-          ce3.save.bind(ce3),
-          ue3.save.bind(ue3),
-          be3.save.bind(be3),
-
-          function(next) {
-            Event.
-              find({}).
-              populate('user comment blogpost').
-              exec(function(err, docs) {
-                docs.forEach(function(doc) {
-                  if (doc.__t === 'User4073') {
-                    assert.ok(doc.user.name.indexOf('user') !== -1);
-                  } else if (doc.__t === 'Comment4073') {
-                    assert.ok(doc.comment.content.indexOf('comment') !== -1);
-                  } else if (doc.__t === 'BlogPost4073') {
-                    assert.ok(doc.blogpost.title.indexOf('blog post') !== -1);
-                  } else {
-                    assert.ok(false);
-                  }
-                });
-                next();
-              });
-          }
-        ],
-        done
-      );
+      return Promise.all(docs.map(d => d.save())).
+        then(() => Event.find({}).populate('user comment blogpost')).
+        then(docs => {
+          docs.forEach(function(doc) {
+            if (doc.__t === 'User4073') {
+              assert.ok(doc.user.name.indexOf('user') !== -1);
+            } else if (doc.__t === 'Comment4073') {
+              assert.ok(doc.comment.content.indexOf('comment') !== -1);
+            } else if (doc.__t === 'BlogPost4073') {
+              assert.ok(doc.blogpost.title.indexOf('blog post') !== -1);
+            } else {
+              assert.ok(false);
+            }
+          });
+        });
     });
 
     it('dynref bug (gh-4104)', function(done) {
@@ -4321,7 +4288,7 @@ describe('model: populate:', function() {
         const Person = db.model('gh2562', PersonSchema);
         const Band = db.model('gh2562_0', BandSchema);
 
-        const people = _.map(['Axl Rose', 'Slash'], function(v) {
+        const people = ['Axl Rose', 'Slash'].map(function(v) {
           return { name: v, band: 'Guns N\' Roses' };
         });
         Person.create(people, function(error) {
@@ -4353,7 +4320,7 @@ describe('model: populate:', function() {
         const Person = db.model('gh6787_Person', PersonSchema);
         const Band = db.model('gh6787_Band', BandSchema);
 
-        const people = _.map(['BB', 'AA', 'AB', 'BA'], function(v) {
+        const people = ['BB', 'AA', 'AB', 'BA'].map(function(v) {
           return { name: v, band: 'Test' };
         });
 
@@ -4384,10 +4351,10 @@ describe('model: populate:', function() {
         const Person = db.model('gh2562_a0', PersonSchema);
         const Band = db.model('gh2562_a1', BandSchema);
 
-        let people = _.map(['Axl Rose', 'Slash'], function(v) {
+        let people = ['Axl Rose', 'Slash'].map(function(v) {
           return { name: v, band: 'Guns N\' Roses' };
         });
-        people = people.concat(_.map(['Vince Neil', 'Nikki Sixx'], function(v) {
+        people = people.concat(['Vince Neil', 'Nikki Sixx'].map(function(v) {
           return { name: v, band: 'Motley Crue' };
         }));
         Person.create(people, function(error) {
@@ -4408,12 +4375,12 @@ describe('model: populate:', function() {
                 assert.equal(bands.length, 2);
                 assert.equal(bands[0].name, 'Guns N\' Roses');
                 assert.equal(bands[0].members.length, 2);
-                assert.deepEqual(_.map(bands[0].members, 'name'),
+                assert.deepEqual(bands[0].members.map(v => v.name),
                   ['Axl Rose', 'Slash']);
 
                 assert.equal(bands[1].name, 'Motley Crue');
                 assert.equal(bands[1].members.length, 2);
-                assert.deepEqual(_.map(bands[1].members, 'name'),
+                assert.deepEqual(bands[1].members.map(v => v.name),
                   ['Nikki Sixx', 'Vince Neil']);
                 done();
               });
@@ -4479,12 +4446,12 @@ describe('model: populate:', function() {
                 assert.equal(bands.length, 2);
                 assert.equal(bands[0].name, 'Guns N\' Roses');
                 assert.equal(bands[0].members.length, 2);
-                assert.deepEqual(_.map(bands[0].members, 'name'),
+                assert.deepEqual(bands[0].members.map(v => v.name),
                   ['Axl Rose', 'Slash']);
 
                 assert.equal(bands[1].name, 'Motley Crue');
                 assert.equal(bands[1].members.length, 2);
-                assert.deepEqual(_.map(bands[1].members, 'name'),
+                assert.deepEqual(bands[1].members.map(v => v.name),
                   ['Nikki Sixx', 'Vince Neil']);
 
                 done();
@@ -6502,7 +6469,7 @@ describe('model: populate:', function() {
         const dateActivitySchema = new Schema({
           postedBy: {
             type: Schema.Types.ObjectId,
-            ref: 'gh5858',
+            ref: 'gh5858_User',
             required: true
           }
         }, options);
@@ -6519,7 +6486,7 @@ describe('model: populate:', function() {
           kind: String
         }, options);
 
-        const User = db.model('gh5858', { name: String });
+        const User = db.model('gh5858_User', { name: String });
         const Activity = db.model('gh5858_0', activitySchema);
         const DateActivity = Activity.discriminator('gh5858_1', dateActivitySchema);
         const EventActivity = Activity.discriminator('gh5858_2', eventActivitySchema);
@@ -7479,7 +7446,7 @@ describe('model: populate:', function() {
 
       const eventSchema = new Schema({
         message: String
-      },{ discriminatorKey: 'kind' });
+      }, { discriminatorKey: 'kind' });
 
       const batchSchema = new Schema({
         events: [eventSchema]
@@ -7820,6 +7787,37 @@ describe('model: populate:', function() {
       assert.ok(Array.isArray(doc.comments));
       assert.equal(doc.comments.length, 1);
       assert.equal(doc.comments[0]._id.toHexString(),
+        comment._id.toHexString());
+    });
+  });
+
+  it('handles virtual justOne if it is not set, is lean, and subfields are selected', function() {
+    const postSchema = new Schema({
+      name: String
+    });
+
+    postSchema.virtual('comments', {
+      ref: 'gh8125_Comment',
+      localField: '_id',
+      foreignField: 'postId'
+    });
+
+    const commentSchema = new Schema({
+      postId: { type: Schema.Types.ObjectId },
+      text: String,
+    });
+
+    const Post = db.model('gh8125_Post', postSchema);
+    const Comment = db.model('gh8125_Comment', commentSchema);
+
+    return co(function*() {
+      const post = yield Post.create({ name: 'n1'});
+      const comment = yield Comment.create({ postId: post._id, text: 'a comment' });
+
+      const doc = yield Post.find({}).populate('comments', 'text').lean();
+      assert.ok(Array.isArray(doc[0].comments));
+      assert.equal(doc[0].comments.length, 1);
+      assert.equal(doc[0].comments[0]._id.toHexString(),
         comment._id.toHexString());
     });
   });
@@ -8392,6 +8390,348 @@ describe('model: populate:', function() {
 
       assert.equal(doc.list.length, 1);
       assert.strictEqual(doc.list[0].fill.child.name, 'test');
+    });
+  });
+
+  it('supports cross-db populate with refPath (gh-6520)', function() {
+    return co(function*() {
+      const db2 = yield mongoose.createConnection(start.uri2);
+
+      const bookSchema = new Schema({ title: String });
+      const movieSchema = new Schema({ title: String });
+
+      const userSchema = new Schema({
+        name: String,
+        kind: String,
+        hobby: {
+          type: Schema.Types.ObjectId,
+          refPath: 'kind'
+        }
+      });
+
+      const User = db.model('gh6520_User', userSchema);
+      const Book = db2.model('Book', bookSchema);
+      const Movie = db2.model('Movie', movieSchema);
+
+      const book = yield Book.create({ title: 'Legacy of the Force: Revelation' });
+      const movie = yield Movie.create({ title: 'A New Hope' });
+
+      yield User.create([
+        { name: 'test1', kind: 'Book', hobby: book._id },
+        { name: 'test2', kind: 'Movie', hobby: movie._id }
+      ]);
+
+      const docs = yield User.find().sort({ name: 1 }).populate({
+        path: 'hobby',
+        connection: db2
+      });
+      assert.equal(docs[0].hobby.title, 'Legacy of the Force: Revelation');
+      assert.equal(docs[1].hobby.title, 'A New Hope');
+    });
+  });
+
+  it('ref function for conventional populate (gh-7669)', function() {
+    const schema = new mongoose.Schema({
+      kind: String,
+      media: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: doc => doc.kind
+      }
+    });
+    const Model = db.model('gh7669', schema);
+    const Movie = db.model('gh7669_Movie', new Schema({ name: String }));
+    const Book = db.model('gh7669_Book', new Schema({ title: String }));
+
+    return co(function*() {
+      const docs = yield [
+        Movie.create({ name: 'The Empire Strikes Back' }),
+        Book.create({ title: 'New Jedi Order' })
+      ];
+
+      yield Model.create([
+        { kind: 'gh7669_Movie', media: docs[0]._id },
+        { kind: 'gh7669_Book', media: docs[1]._id }
+      ]);
+
+      const res = yield Model.find().sort({ kind: -1 }).populate('media');
+
+      assert.equal(res[0].kind, 'gh7669_Movie');
+      assert.equal(res[0].media.name, 'The Empire Strikes Back');
+      assert.equal(res[1].kind, 'gh7669_Book');
+      assert.equal(res[1].media.title, 'New Jedi Order');
+    });
+  });
+
+  it('virtual refPath (gh-7848)', function() {
+    const Child = db.model('gh7848_Child', Schema({
+      name: String,
+      parentId: Number
+    }));
+
+    const parentSchema = Schema({
+      _id: Number,
+      kind: String
+    });
+    parentSchema.virtual('childDocs', {
+      refPath: 'kind',
+      localField: '_id',
+      foreignField: 'parentId',
+      justOne: false
+    });
+    const Parent = db.model('gh7848_Parent', parentSchema);
+
+    return co(function*() {
+      yield Parent.create({ _id: 1, kind: 'gh7848_Child' });
+      yield Child.create({ name: 'test', parentId: 1 });
+
+      const doc = yield Parent.findOne().populate('childDocs');
+      assert.equal(doc.childDocs.length, 1);
+      assert.equal(doc.childDocs[0].name, 'test');
+    });
+  });
+
+  it('handles refPath on discriminator when populating top-level model (gh-5109)', function() {
+    const options = { discriminatorKey: 'kind' };
+    const Post = db.model('gh5109_Post', new Schema({ time: Date, text: String }, options));
+
+    const MediaPost = Post.discriminator('gh5109_MediaPost', new Schema({
+      media: { type: Schema.Types.ObjectId, refPath: 'mediaType' },
+      mediaType: String // either 'Image' or 'Video'
+    }, options));
+    const Image = db.model('gh5109_Image',
+      new Schema({ url: String }));
+    const Video = db.model('gh5109_Video',
+      new Schema({ url: String, duration: Number }));
+
+    return co(function*() {
+      const image = yield Image.create({ url: 'test' });
+      const video = yield Video.create({ url: 'foo', duration: 42 });
+
+      yield MediaPost.create([
+        { media: image._id, mediaType: 'gh5109_Image' },
+        { media: video._id, mediaType: 'gh5109_Video' }
+      ]);
+
+      const docs = yield Post.find().populate('media').sort({ mediaType: 1 });
+
+      assert.equal(docs.length, 2);
+      assert.ok(docs[0].populated('media'));
+      assert.ok(docs[1].populated('media'));
+
+      assert.equal(docs[0].media.url, 'test');
+      assert.equal(docs[1].media.url, 'foo');
+      assert.equal(docs[1].media.duration, 42);
+    });
+  });
+
+  it('refPath with virtual (gh-7341)', function() {
+    const options = { discriminatorKey: 'kind' };
+    const postSchema = new Schema({
+      media: { type: Schema.Types.ObjectId, refPath: 'mediaType' },
+      _mediaType: String // either 'Image' or 'Video'
+    }, options);
+
+    postSchema.virtual('mediaType').get(function() { return this._mediaType; });
+
+    const Post = db.model('gh7341_Post', postSchema);
+    const Image = db.model('gh7341_Image', new Schema({ url: String }));
+    const Video = db.model('gh7341_Video', new Schema({ url: String, duration: Number }));
+
+    return co(function*() {
+      const image = yield Image.create({ url: 'test' });
+      const video = yield Video.create({ url: 'foo', duration: 42 });
+
+      yield Post.create([
+        { media: image._id, _mediaType: 'gh7341_Image' },
+        { media: video._id, _mediaType: 'gh7341_Video' }
+      ]);
+
+      const docs = yield Post.find().populate('media').sort({ _mediaType: 1 });
+
+      assert.ok(docs[0].populated('media'));
+      assert.ok(docs[1].populated('media'));
+
+      assert.equal(docs[0].media.url, 'test');
+      assert.equal(docs[1].media.url, 'foo');
+      assert.equal(docs[1].media.duration, 42);
+    });
+  });
+
+  it('count with subdocs (gh-7573)', function() {
+    const DeveloperSchema = Schema({ name: String });
+    const TeamSchema = Schema({
+      name: String,
+      developers: [DeveloperSchema]
+    });
+    const TicketSchema = Schema({
+      assigned: String,
+      description: String
+    });
+
+    DeveloperSchema.virtual('ticketCount', {
+      ref: 'gh7573_Ticket',
+      localField: 'name',
+      foreignField: 'assigned',
+      count: true
+    });
+
+    const Ticket = db.model('gh7573_Ticket', TicketSchema);
+    const Team = db.model('gh7573_Team', TeamSchema);
+
+    return co(function*() {
+      yield Team.create({
+        name: 'Rocket',
+        developers: [{ name: 'Jessie' }, { name: 'James' }, { name: 'Meowth' }]
+      });
+      yield Ticket.create([
+        { assigned: 'Jessie', description: 'test1' },
+        { assigned: 'James', description: 'test2' },
+        { assigned: 'Jessie', description: 'test3' }
+      ]);
+
+      const team = yield Team.findOne().populate('developers.ticketCount');
+      assert.equal(team.developers[0].ticketCount, 2);
+      assert.equal(team.developers[1].ticketCount, 1);
+      assert.equal(team.developers[2].ticketCount, 0);
+    });
+  });
+
+  it('handles virtual populate of an embedded discriminator nested path (gh-6488) (gh-8173)', function() {
+    return co(function*() {
+      const UserModel = db.model('gh6488_User', Schema({
+        employeeId: Number,
+        name: String
+      }));
+
+      const eventSchema = Schema({ message: String }, { discriminatorKey: 'kind' });
+      const batchSchema = Schema({ nested: { events: [eventSchema] } });
+
+      const nestedLayerSchema = Schema({ users: [ Number ] });
+      nestedLayerSchema.virtual('users_$', {
+        ref: 'gh6488_User',
+        localField: 'users',
+        foreignField: 'employeeId'
+      });
+
+      const docArray = batchSchema.path('nested.events');
+      docArray.discriminator('gh6488_Clicked', Schema({ nestedLayer: nestedLayerSchema }));
+      docArray.discriminator('gh6488_Purchased', Schema({ purchased: String }));
+
+      const Batch = db.model('gh6488', batchSchema);
+
+      yield UserModel.create({ employeeId: 1, name: 'test' });
+      yield Batch.create({
+        nested: {
+          events: [
+            { kind: 'gh6488_Clicked', nestedLayer: { users: [1] } },
+            { kind: 'gh6488_Purchased', purchased: 'test' }
+          ]
+        }
+      });
+
+      let res = yield Batch.findOne().
+        populate('nested.events.nestedLayer.users_$');
+      assert.equal(res.nested.events[0].nestedLayer.users_$.length, 1);
+      assert.equal(res.nested.events[0].nestedLayer.users_$[0].name, 'test');
+
+      res = res.toObject({ virtuals: true });
+      assert.equal(res.nested.events[0].nestedLayer.users_$.length, 1);
+      assert.equal(res.nested.events[0].nestedLayer.users_$[0].name, 'test');
+    });
+  });
+
+  it('accessing populate virtual prop (gh-8198)', function() {
+    const FooSchema = new Schema({
+      name: String,
+      children: [{
+        barId: { type: Schema.Types.ObjectId, ref: 'gh8198_Bar' },
+        quantity: Number,
+      }]
+    });
+    FooSchema.virtual('children.bar', {
+      ref: 'gh8198_Bar',
+      localField: 'children.barId',
+      foreignField: '_id',
+      justOne: true
+    });
+    const BarSchema = Schema({ name: String });
+    const Foo = db.model('gh8198_FooSchema', FooSchema);
+    const Bar = db.model('gh8198_Bar', BarSchema);
+    return co(function*() {
+      const bar = yield Bar.create({ name: 'bar' });
+      const foo = yield Foo.create({
+        name: 'foo',
+        children: [{ barId: bar._id, quantity: 1 }]
+      });
+      const foo2 = yield Foo.findById(foo._id).populate('children.bar');
+      assert.equal(foo2.children[0].bar.name, 'bar');
+    });
+  });
+
+  describe('gh-8247', function() {
+    let Author;
+    let Page;
+
+    before(function() {
+      const authorSchema = Schema({ name: String });
+      const subSchema = Schema({
+        author: { type: Schema.Types.ObjectId, ref: 'gh8247_Author' },
+        comment: String
+      });
+      const pageSchema = Schema({ title: String, comments: [subSchema] });
+      Author = db.model('gh8247_Author', authorSchema);
+      Page = db.model('gh8247_Page', pageSchema);
+    });
+
+    this.beforeEach(() => co(function*() {
+      yield Author.deleteMany({});
+      yield Page.deleteMany({});
+    }));
+
+    it('checking `populated()` on a document array element (gh-8247)', function() {
+      return co(function*() {
+        const doc = yield Author.create({ name: 'test author' });
+        yield Page.create({ comments: [{ author: doc._id }] });
+
+        const fromDb = yield Page.findOne().populate('comments.author');
+        assert.ok(Array.isArray(fromDb.populated('comments.author')));
+        assert.equal(fromDb.populated('comments.author').length, 1);
+        assert.equal(fromDb.comments[0].author.name, 'test author');
+
+        assert.ok(fromDb.comments[0].populated('author'));
+      });
+    });
+
+    it('updates top-level populated() when pushing elements onto a document array with single populated path (gh-8247)', function() {
+      return co(function*() {
+        const docs = yield Author.create([
+          { name: 'test1' },
+          { name: 'test2' }
+        ]);
+        yield Page.create({ comments: [{ author: docs[0]._id }] });
+
+        // Try setting to non-manually populated path...
+        let fromDb = yield Page.findOne().populate('comments.author');
+        assert.ok(Array.isArray(fromDb.populated('comments.author')));
+        assert.equal(fromDb.populated('comments.author').length, 1);
+        assert.equal(fromDb.comments[0].author.name, 'test1');
+
+        fromDb.comments.push({ author: docs[1]._id });
+        let pop = fromDb.populated('comments.author');
+        assert.equal(pop.length, 2);
+        assert.equal(pop[0].toHexString(), docs[0]._id.toHexString());
+        assert.equal(pop[1], null);
+
+        // And try setting to populated path
+        fromDb = yield Page.findOne().populate('comments.author');
+        assert.ok(Array.isArray(fromDb.populated('comments.author')));
+        assert.equal(fromDb.populated('comments.author').length, 1);
+        assert.equal(fromDb.comments[0].author.name, 'test1');
+
+        fromDb.comments.push({ author: docs[1] });
+        pop = fromDb.populated('comments.author');
+        assert.equal(pop.length, 2);
+      });
     });
   });
 });

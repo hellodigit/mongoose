@@ -7,7 +7,6 @@
 const start = require('./common');
 const Query = require('../lib/query');
 const assert = require('assert');
-const async = require('async');
 const co = require('co');
 const random = require('../lib/utils').random;
 
@@ -846,39 +845,37 @@ describe('Query', function() {
 
     it('overwrites duplicate paths', function(done) {
       const q = new Query({}, {}, null, p1.collection);
-      const o = {
+      let o = {
         path: 'yellow.brick',
         match: {bricks: {$lt: 1000}},
-        select: undefined,
-        model: undefined,
-        options: undefined,
         _docs: {}
       };
-      q.populate(o);
+      q.populate(Object.assign({}, o));
       assert.equal(Object.keys(q._mongooseOptions.populate).length, 1);
-      assert.deepEqual(o, q._mongooseOptions.populate['yellow.brick']);
+      assert.deepEqual(q._mongooseOptions.populate['yellow.brick'], o);
+
       q.populate('yellow.brick');
+      o = {
+        path: 'yellow.brick',
+        _docs: {}
+      };
       assert.equal(Object.keys(q._mongooseOptions.populate).length, 1);
-      o.match = undefined;
-      assert.deepEqual(o, q._mongooseOptions.populate['yellow.brick']);
+      assert.deepEqual(q._mongooseOptions.populate['yellow.brick'], o);
       done();
     });
 
     it('accepts space delimited strings', function(done) {
       const q = new Query({}, {}, null, p1.collection);
       q.populate('yellow.brick dirt');
-      const o = {
-        path: 'yellow.brick',
-        match: undefined,
-        select: undefined,
-        model: undefined,
-        options: undefined,
-        _docs: {}
-      };
       assert.equal(Object.keys(q._mongooseOptions.populate).length, 2);
-      assert.deepEqual(o, q._mongooseOptions.populate['yellow.brick']);
-      o.path = 'dirt';
-      assert.deepEqual(o, q._mongooseOptions.populate.dirt);
+      assert.deepEqual(q._mongooseOptions.populate['yellow.brick'], {
+        path: 'yellow.brick',
+        _docs: {}
+      });
+      assert.deepEqual(q._mongooseOptions.populate['dirt'], {
+        path: 'dirt',
+        _docs: {}
+      });
       done();
     });
   });
@@ -1609,7 +1606,7 @@ describe('Query', function() {
       q.setOptions({read: ['s', [{dc: 'eu'}]]});
 
       assert.equal(q.options.thing, 'cat');
-      assert.deepEqual(q._mongooseOptions.populate.fans, {path: 'fans', select: undefined, match: undefined, options: undefined, model: undefined, _docs: {}});
+      assert.deepEqual(q._mongooseOptions.populate.fans, {path: 'fans', _docs: {}});
       assert.equal(q.options.batchSize, 10);
       assert.equal(q.options.limit, 4);
       assert.equal(q.options.skip, 3);
@@ -2093,8 +2090,8 @@ describe('Query', function() {
         const q = Test.find({ test: void 0 });
         const res = yield q.exec();
 
-        assert.strictEqual(q.getQuery().test, void 0);
-        assert.ok('test' in q.getQuery());
+        assert.strictEqual(q.getFilter().test, void 0);
+        assert.ok('test' in q.getFilter());
         assert.equal(res.length, 1);
       });
     });
@@ -2410,6 +2407,7 @@ describe('Query', function() {
       });
 
       it('throw on sync exceptions in callbacks (gh-6178)', function(done) {
+        const async = require('async');
         const schema = new Schema({});
         const Test = db.model('gh6178', schema);
 
@@ -3065,6 +3063,8 @@ describe('Query', function() {
           orFail().
           then(() => null, err => err);
         assert.equal(err.name, 'DocumentNotFoundError', err.stack);
+        assert.ok(err.message.indexOf('na') !== -1, err.message);
+        assert.ok(err.message.indexOf('gh6841') !== -1, err.message);
         assert.deepEqual(err.filter, { name: 'na' });
       });
     });
@@ -3137,6 +3137,43 @@ describe('Query', function() {
       q.setUpdate({ $set: { newPath: 'newValue' } });
       assert.strictEqual(q._update.$set.testing, undefined);
       assert.strictEqual(q._update.$set.newPath, 'newValue');
+    });
+  });
+
+  describe('get() (gh-7312)', function() {
+    it('works with using $set', function() {
+      const q = new Query({}, {}, null, p1.collection);
+      q.updateOne({}, { $set: { name: 'Jean-Luc Picard' } });
+
+      assert.equal(q.get('name'), 'Jean-Luc Picard');
+    });
+
+    it('works with $set syntactic sugar', function() {
+      const q = new Query({}, {}, null, p1.collection);
+      q.updateOne({}, { name: 'Jean-Luc Picard' });
+
+      assert.equal(q.get('name'), 'Jean-Luc Picard');
+    });
+
+    it('works with mixed', function() {
+      const q = new Query({}, {}, null, p1.collection);
+      q.updateOne({}, { name: 'Jean-Luc Picard', $set: { age: 59 } });
+
+      assert.equal(q.get('name'), 'Jean-Luc Picard');
+    });
+
+    it('$set overwrites existing', function() {
+      const M = db.model('gh7312', new Schema({ name: String }));
+      const q = M.updateOne({}, {
+        name: 'Jean-Luc Picard',
+        $set: { name: 'William Riker' }
+      }, { upsert: true });
+
+      assert.equal(q.get('name'), 'Jean-Luc Picard');
+
+      return q.exec().
+        then(() => M.findOne()).
+        then(doc => assert.equal(doc.name, 'Jean-Luc Picard'));
     });
   });
 
@@ -3396,6 +3433,38 @@ describe('Query', function() {
     });
   });
 
+  it('connection-level maxTimeMS() (gh-4066)', function() {
+    db.options = db.options || {};
+    db.options.maxTimeMS = 10;
+    const Model = db.model('gh4066_conn', new Schema({}));
+
+    return co(function*() {
+      yield Model.create({});
+
+      const res = yield Model.find({ $where: 'sleep(250) || true' }).
+        then(() => null, err => err);
+      assert.ok(res);
+      assert.ok(res.message.indexOf('time limit') !== -1, res.message);
+      delete db.options.maxTimeMS;
+    });
+  });
+
+  it('mongoose-level maxTimeMS() (gh-4066)', function() {
+    db.base.options = db.base.options || {};
+    db.base.options.maxTimeMS = 10;
+    const Model = db.model('gh4066_global', new Schema({}));
+
+    return co(function*() {
+      yield Model.create({});
+
+      const res = yield Model.find({ $where: 'sleep(250) || true' }).
+        then(() => null, err => err);
+      assert.ok(res);
+      assert.ok(res.message.indexOf('time limit') !== -1, res.message);
+      delete db.base.options.maxTimeMS;
+    });
+  });
+
   it('throws error with updateOne() and overwrite (gh-7475)', function() {
     const Model = db.model('gh7475', new Schema({ name: String }));
 
@@ -3447,5 +3516,65 @@ describe('Query', function() {
         assert.equal(res.owner.name, 'Val');
       });
     });
+  });
+
+  describe('Query#validate() (gh-7984)', function() {
+    it('middleware', function() {
+      const schema = new Schema({
+        password: {
+          type: String,
+          validate: v => v.length >= 6,
+          required: true
+        }
+      });
+
+      let docCalls = 0;
+      schema.post('validate', function() {
+        ++docCalls;
+      });
+      let queryCalls = 0;
+      schema.post('validate', { query: true }, function() {
+        ++queryCalls;
+        const pw = this.get('password');
+        assert.equal(pw, '6chars');
+        this.set('password', 'encryptedpassword');
+      });
+
+      const M = db.model('gh7984', schema);
+
+      const opts = { runValidators: true, upsert: true, new: true };
+      return M.findOneAndUpdate({}, { password: '6chars' }, opts).then(doc => {
+        assert.equal(docCalls, 0);
+        assert.equal(queryCalls, 1);
+        assert.equal(doc.password, 'encryptedpassword');
+      });
+    });
+
+    it('pre("validate") errors (gh-7187)', function() {
+      const addressSchema = Schema({ countryId: String });
+      addressSchema.pre('validate', { query: true }, function() {
+        throw new Error('Oops!');
+      });
+      const contactSchema = Schema({ addresses: [addressSchema] });
+      const Contact = db.model('gh7187', contactSchema);
+
+      const update = { addresses: [{ countryId: 'foo' }] };
+      return Contact.updateOne({}, update, { runValidators: true }).then(
+        () => assert.ok(false),
+        err => {
+          assert.ok(err.errors['addresses.0']);
+          assert.equal(err.errors['addresses.0'].message, 'Oops!');
+        }
+      );
+    });
+  });
+
+  it('query with top-level _bsontype (gh-8222)', function() {
+    const userSchema = Schema({ token: String });
+    const User = db.model('gh8222', userSchema);
+
+    return User.create({ token: 'rightToken' }).
+      then(() => User.findOne({ token: 'wrongToken', _bsontype: 'a' })).
+      then(doc => assert.ok(!doc));
   });
 });

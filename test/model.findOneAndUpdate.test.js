@@ -13,8 +13,9 @@ const Utils = require('../lib/utils');
 const Schema = mongoose.Schema;
 const ObjectId = Schema.Types.ObjectId;
 const DocumentObjectId = mongoose.Types.ObjectId;
-const _ = require('lodash');
 const co = require('co');
+const isEqual = require('lodash.isequal');
+const isEqualWith = require('lodash.isequalwith');
 const uuid = require('uuid');
 
 describe('model: findOneAndUpdate:', function() {
@@ -838,6 +839,24 @@ describe('model: findOneAndUpdate:', function() {
       });
     });
   });
+  it('return hydrated document (gh-7734 gh-7735)', function() {
+    const fruitSchema = new Schema({
+      name: { type: String }
+    });
+
+    const Fruit = db.model('gh-7734', fruitSchema);
+    return co(function*() {
+      let fruit = yield Fruit.create({ name: 'Apple' });
+
+      fruit = yield Fruit.findOneAndUpdate({}, { $set: { name: 'Banana' }},
+        { new: true, useFindAndModify: false });
+      assert.ok(fruit instanceof mongoose.Document);
+
+      fruit = yield Fruit.findOneAndUpdate({}, { $set: { name: 'Cherry' }},
+        { new: true, useFindAndModify: true });
+      assert.ok(fruit instanceof mongoose.Document);
+    });
+  });
   it('return rawResult when doing an upsert & new=false gh-7770', function(done) {
     const thingSchema = new Schema({
       _id: String,
@@ -928,20 +947,20 @@ describe('model: findOneAndUpdate:', function() {
           function(error, doc) {
             assert.ifError(error);
             assert.ok(Utils.deepEqual(doc.contacts[0].account, a2._id));
-            assert.ok(_.isEqualWith(doc.contacts[0].account, a2._id, compareBuffers));
+            assert.ok(isEqualWith(doc.contacts[0].account, a2._id, compareBuffers));
             // Re: commends on https://github.com/mongodb/js-bson/commit/aa0b54597a0af28cce3530d2144af708e4b66bf0
             // Deep equality checks no longer work as expected with node 0.10.
             // Please file an issue if this is a problem for you
             if (!/^v0.10.\d+$/.test(process.version)) {
-              assert.ok(_.isEqual(doc.contacts[0].account, a2._id));
+              assert.ok(isEqual(doc.contacts[0].account, a2._id));
             }
 
             Account.findOne({name: 'parent'}, function(error, doc) {
               assert.ifError(error);
               assert.ok(Utils.deepEqual(doc.contacts[0].account, a2._id));
-              assert.ok(_.isEqualWith(doc.contacts[0].account, a2._id, compareBuffers));
+              assert.ok(isEqualWith(doc.contacts[0].account, a2._id, compareBuffers));
               if (!/^v0.10.\d+$/.test(process.version)) {
-                assert.ok(_.isEqual(doc.contacts[0].account, a2._id));
+                assert.ok(isEqual(doc.contacts[0].account, a2._id));
               }
               done();
             });
@@ -1207,6 +1226,26 @@ describe('model: findOneAndUpdate:', function() {
             done();
           });
         });
+    });
+
+    it('skips setting defaults within maps (gh-7909)', function() {
+      const socialMediaHandleSchema = Schema({ links: [String] });
+      const profileSchema = Schema({
+        username: String,
+        socialMediaHandles: {
+          type: Map,
+          of: socialMediaHandleSchema,
+        }
+      });
+
+      const Profile = db.model('gh7909', profileSchema);
+
+      return co(function*() {
+        const update = { $setOnInsert: { username: 'test' } };
+        const opts = { upsert: true, setDefaultsOnInsert: true, new: true };
+        const doc = yield Profile.findOneAndUpdate({}, update, opts);
+        assert.equal(doc.socialMediaHandles, undefined);
+      });
     });
 
     it('runs validators if theyre set', function(done) {
@@ -2312,6 +2351,56 @@ describe('model: findOneAndUpdate:', function() {
       // Should not throw
       doc = yield Model.findOneAndUpdate({ _id: doc._id }, void 0, { new: true });
       assert.equal(doc.name, 'test');
+    });
+  });
+
+  it('skipping updatedAt and createdAt (gh-3934)', function() {
+    const schema = new Schema({ name: String }, { timestamps: true });
+    const Model = db.model('gh3934', schema);
+
+    return co(function*() {
+      let doc = yield Model.findOneAndUpdate({}, { name: 'test' }, {
+        upsert: true,
+        new: true,
+        timestamps: { createdAt: false }
+      });
+      assert.ok(!doc.createdAt);
+      assert.ok(doc.updatedAt);
+      const start = doc.updatedAt;
+      doc = yield Model.findOneAndUpdate({ _id: doc._id }, { name: 'test2' }, {
+        new: true,
+        timestamps: { updatedAt: false }
+      });
+      assert.equal(doc.updatedAt.valueOf(), start.valueOf());
+    });
+  });
+
+  it('runs lowercase on $addToSet, $push, etc (gh-4185)', function() {
+    const Cat = db.model('gh4185', {
+      _id: String,
+      myArr: { type: [{type: String, lowercase: true}], default: undefined }
+    });
+
+    return co(function*() {
+      yield Cat.create({ _id: 'test' });
+      const res = yield Cat.findOneAndUpdate({}, {
+        $addToSet: { myArr: ['Case SenSiTive'] }
+      }, { new: true });
+      assert.equal(res.myArr[0], 'case sensitive');
+    });
+  });
+
+  it('returnOriginal (gh-7846)', function() {
+    const Cat = db.model('gh7846_update', {
+      name: String
+    });
+
+    return co(function*() {
+      yield Cat.create({ name: 'test' });
+      const res = yield Cat.findOneAndUpdate({}, {
+        name: 'test2'
+      }, { returnOriginal: false, useFindAndModify: false });
+      assert.equal(res.name, 'test2');
     });
   });
 });

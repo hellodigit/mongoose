@@ -408,4 +408,52 @@ describe('model: findOneAndReplace:', function() {
         err.errors['age'].message);
     });
   });
+
+  it('schema-level projection (gh-7654)', function() {
+    const schema = new Schema({ name: String, age: { type: Number, select: false } });
+    const Model = db.model('gh7654_0', schema);
+
+    return co(function*() {
+      const doc = yield Model.findOneAndReplace({}, { name: 'Jean-Luc Picard', age: 59 }, {
+        upsert: true,
+        returnOriginal: false
+      });
+
+      assert.ok(!doc.age);
+    });
+  });
+
+  it('supports `new` in addition to `returnOriginal` (gh-7846)', function() {
+    const schema = new Schema({ name: String, age: Number });
+    const Model = db.model('gh7846', schema);
+
+    return co(function*() {
+      const doc = yield Model.findOneAndReplace({}, { name: 'Jean-Luc Picard', age: 59 }, {
+        upsert: true,
+        new: true
+      });
+
+      assert.equal(doc.age, 59);
+    });
+  });
+
+  it('orFail() (gh-8030)', function() {
+    const schema = Schema({ name: String, age: Number });
+    const Model = db.model('gh8030', schema);
+
+    return co(function*() {
+      let err = yield Model.findOneAndReplace({}, { name: 'test' }).orFail().
+        then(() => assert.ok(false), err => err);
+
+      assert.ok(err);
+      assert.equal(err.name, 'DocumentNotFoundError');
+
+      yield Model.create({ name: 'test' });
+      err = yield Model.findOneAndReplace({ name: 'test' }, { name: 'test2' }).
+        orFail().
+        then(() => null, err => err);
+
+      assert.ifError(err);
+    });
+  });
 });

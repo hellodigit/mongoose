@@ -1080,6 +1080,46 @@ describe('model', function() {
         catch(done);
     });
 
+    it('embedded with single nested subdocs and tied value (gh-8164)', function() {
+      const eventSchema = new Schema({ message: String },
+        { discriminatorKey: 'kind', _id: false });
+
+        const trackSchema = new Schema({ event: eventSchema });
+      trackSchema.path('event').discriminator('Clicked', new Schema({
+        element: String
+      }, { _id: false }), 'click');
+      trackSchema.path('event').discriminator('Purchased', new Schema({
+        product: String
+      }, { _id: false }), 'purchase');
+
+      const MyModel = db.model('gh8164', trackSchema);
+      const doc1 = {
+        event: {
+          kind: 'click',
+          element: 'Amazon Link'
+        }
+      };
+      const doc2 = {
+        event: {
+          kind: 'purchase',
+          product: 'Professional AngularJS'
+        }
+      };
+      return MyModel.create([doc1, doc2]).
+        then(function(docs) {
+          const doc1 = docs[0];
+          const doc2 = docs[1];
+
+          assert.equal(doc1.event.kind, 'click');
+          assert.equal(doc1.event.element, 'Amazon Link');
+          assert.ok(!doc1.event.product);
+
+          assert.equal(doc2.event.kind, 'purchase');
+          assert.equal(doc2.event.product, 'Professional AngularJS');
+          assert.ok(!doc2.event.element);
+        });
+    });
+
     it('Embedded discriminators in nested doc arrays (gh-6202)', function() {
       const eventSchema = new Schema({ message: String }, {
         discriminatorKey: 'kind',
@@ -1228,7 +1268,7 @@ describe('model', function() {
           assert.equal(doc.event.message, 'Test')
           assert.equal(doc.event.kind, 'Purchased')
           Object.keys(counters).forEach(function(i) {
-            assert.equal(counters[i], 1);
+            assert.equal(counters[i], 1, 'Counter ' + i + ' incorrect');
           });
           done();
         });
@@ -1354,6 +1394,19 @@ describe('model', function() {
       assert.equal(doc.test, 'b');
     });
 
+    it('uses correct discriminator when using `new BaseModel` with value (gh-7851)', function() {
+      const options = { discriminatorKey: 'kind' };
+
+      const BaseModel = mongoose.model('gh7851_Base',
+        Schema({ name: String }, options));
+      const ChildModel = BaseModel.discriminator('gh7851_Child',
+        Schema({ test: String }, options), 'child');
+
+      const doc = new BaseModel({ kind: 'child', name: 'a', test: 'b' });
+      assert.ok(doc instanceof ChildModel);
+      assert.equal(doc.test, 'b');
+    });
+
     it('allows setting custom discriminator key in schema (gh-7807)', function() {
       const eventSchema = Schema({
         title: String,
@@ -1407,6 +1460,30 @@ describe('model', function() {
         assert.equal(doc.sections[0].kind, 'image');
         assert.equal(doc.sections[1].kind, 'text');
       });
+    });
+
+    it('merges schemas instead of overwriting (gh-7884)', function() {
+      const opts = { discriminatorKey: 'kind' };
+
+      const eventSchema = Schema({ lookups: [{ name: String }] }, opts);
+      const Event = db.model('gh7884_event', eventSchema);
+
+      const ClickedLinkEvent = Event.discriminator('gh7844_clicked', Schema({
+        lookups: [{ hi: String }],
+        url: String
+      }, opts));
+
+      const e = new ClickedLinkEvent({
+        lookups: [{
+          hi: 'address1',
+          name: 'address2',
+        }],
+        url: 'google.com'
+      });
+      assert.equal(e.lookups.length, 1);
+      assert.equal(e.lookups[0].hi, 'address1');
+      assert.equal(e.get('lookups.0.name'), 'address2');
+      assert.equal(e.lookups[0].name, 'address2');
     });
   });
 });

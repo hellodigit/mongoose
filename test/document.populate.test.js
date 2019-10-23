@@ -319,7 +319,7 @@ describe('document.populate', function() {
         assert.ifError(err);
 
         // stuff an ad-hoc value in
-        post.setValue('idontexist', user1._id);
+        post.$__setValue('idontexist', user1._id);
 
         // populate the non-schema value by passing an explicit model
         post.populate({path: 'idontexist', model: 'doc.populate.u'}, function(err, post) {
@@ -479,19 +479,15 @@ describe('document.populate', function() {
   });
 
   describe('of new document', function() {
-    it('should save just the populated _id (gh-1442)', function(done) {
+    it('should save just the populated _id (gh-1442)', function() {
       const b = new B({_creator: user1});
-      b.populate('_creator', function(err, b) {
-        if (err) return done(err);
+      return co(function*() {
+        yield b.populate('_creator').execPopulate();
         assert.equal(b._creator.name, 'Phoenix');
-        b.save(function(err) {
-          assert.ifError(err);
-          B.collection.findOne({_id: b._id}, function(err, b) {
-            assert.ifError(err);
-            assert.equal(b._creator, String(user1._id));
-            done();
-          });
-        });
+        yield b.save();
+
+        const _b = yield B.collection.findOne({_id: b._id});
+        assert.equal(_b._creator.toString(), String(user1._id));
       });
     });
   });
@@ -563,6 +559,44 @@ describe('document.populate', function() {
             });
           });
         });
+      });
+    });
+  });
+
+  describe('gh-7889', function() {
+    it('should save item added to array after populating the array', function(done) {
+      const Car = db.model('gh-7889-1', {
+        model: Number
+      });
+
+      const Player = db.model('gh-7889-2', {
+        cars: [{ type: Schema.Types.ObjectId, ref: 'gh-7889-1' }]
+      });
+
+      let player;
+
+      Car.create({ model: 0 }).then(car => {
+        return Player.create({ cars: [car._id] });
+      }).then(() => {
+        return Player.findOne({});
+      }).then(p => {
+        player = p;
+        return player.populate('cars').execPopulate();
+      }).then(() => {
+        return Car.create({ model: 1 });
+      }).then(car => {
+        player.cars.push(car);
+        return player.populate('cars').execPopulate();
+      }).then(() => {
+        return Car.create({ model: 2 });
+      }).then(car => {
+        player.cars.push(car);
+        return player.save();
+      }).then(() => {
+        return Player.findOne({});
+      }).then(player => {
+        assert.equal(player.cars.length, 3);
+        done();
       });
     });
   });

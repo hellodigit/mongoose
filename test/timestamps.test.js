@@ -252,4 +252,44 @@ describe('timestamps', function() {
         `Timestamp not updated: ${doc.children[0].updatedAt}`);
     });
   });
+
+  it('respects timestamps: false in child schema (gh-8007)', function() {
+    const sub = Schema({ name: String }, { timestamps: false, _id: false });
+    const schema = Schema({ data: sub });
+
+    const Model = db.model('gh8007', schema);
+
+    return co(function*() {
+      let res = yield Model.create({ data: {} });
+
+      yield Model.bulkWrite([
+        {
+          updateOne: {
+            filter: {
+              _id: res._id
+            },
+            update: {
+              'data.name': 'foo'
+            }
+          }
+        }
+      ]);
+
+      res = yield Model.findOne({}).lean();
+      assert.deepEqual(res.data, { name: 'foo' });
+    });
+  });
+
+  it('updates updatedAt when calling update without $set (gh-4768)', function() {
+    const Model = db.model('gh4768', Schema({ name: String }, { timestamps: true }));
+
+    return co(function*() {
+      let doc = yield Model.create({ name: 'test1' });
+      const start = doc.updatedAt;
+
+      yield cb => setTimeout(cb, 50);
+      doc = yield Model.findOneAndUpdate({}, doc.toObject(), { new: true });
+      assert.ok(doc.updatedAt > start, `${doc.updatedAt} >= ${start}`);
+    });
+  });
 });

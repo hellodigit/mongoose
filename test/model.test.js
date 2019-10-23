@@ -1829,7 +1829,7 @@ describe('Model', function() {
       let num = a.number;
       assert.equal(called, true);
       assert.equal(num.valueOf(), 100);
-      assert.equal(a.getValue('number').valueOf(), 50);
+      assert.equal(a.$__getValue('number').valueOf(), 50);
 
       called = false;
       const b = new A;
@@ -1838,7 +1838,7 @@ describe('Model', function() {
       num = b.number;
       assert.equal(called, true);
       assert.equal(num.valueOf(), 100);
-      assert.equal(b.getValue('number').valueOf(), 50);
+      assert.equal(b.$__getValue('number').valueOf(), 50);
       done();
     });
 
@@ -4149,12 +4149,13 @@ describe('Model', function() {
   });
 
   it('setters trigger on null values (gh-1445)', function(done) {
+    const calls = [];
     const OrderSchema = new Schema({
       total: {
         type: Number,
         default: 0,
         set: function(value) {
-          assert.strictEqual(null, value);
+          calls.push(value);
           return 10;
         }
       }
@@ -4162,6 +4163,8 @@ describe('Model', function() {
 
     const Order = db.model('order' + random(), OrderSchema);
     const o = new Order({total: null});
+
+    assert.deepEqual(calls, [0, null]);
     assert.equal(o.total, 10);
     done();
   });
@@ -4261,6 +4264,28 @@ describe('Model', function() {
         assert.equal(personDoc.name, 'Jimmy Page');
         assert.equal(personDoc.nested.tag, 'guitarist');
         assert.equal(personDoc.nested.loc, undefined);
+      });
+    });
+
+    it('2dsphere indexed field with geojson without value is saved (gh-3233)', function() {
+      const LocationSchema = new Schema({
+        name: { type: String, required: true },
+        location: {
+          type: { type: String, enum: ['Point'] },
+          coordinates: [Number]
+        }
+      });
+
+      LocationSchema.index({ 'location': '2dsphere' });
+
+      const Location = db.model('gh3233', LocationSchema);
+
+      return co(function*() {
+        yield Location.init();
+
+        yield Location.create({
+          name: 'Undefined location'
+        });
       });
     });
 
@@ -4751,6 +4776,11 @@ describe('Model', function() {
       });
     });
 
+    it('returns empty array if no documents (gh-8130)', function() {
+      const Movie = db.model('gh8130', Schema({ name: String }));
+      return Movie.insertMany([]).then(docs => assert.deepEqual(docs, []));
+    });
+
     it('insertMany() multi validation error with ordered false (gh-5337)', function(done) {
       const schema = new Schema({
         name: { type: String, required: true }
@@ -4856,6 +4886,49 @@ describe('Model', function() {
         assert.ok(threw);
         assert.equal(postCalled, 0);
         assert.equal(postErrorCalled, 1);
+      });
+    });
+
+    it('insertMany() return docs with empty modifiedPaths (gh-7852)', function() {
+      const schema = new Schema({
+        name: { type: String }
+      });
+
+      const Food = db.model('gh7852', schema);
+
+      return co(function*() {
+        const foods = yield Food.insertMany([
+          { name: 'Rice dumplings' },
+          { name: 'Beef noodle' }
+        ]);
+        assert.equal(foods[0].modifiedPaths().length, 0);
+        assert.equal(foods[1].modifiedPaths().length, 0);
+      });
+    });
+
+    it('deleteOne() with options (gh-7857)', function(done) {
+      const schema = new Schema({
+        name: String
+      });
+      const Character = db.model('gh7857', schema);
+
+      const arr = [
+        { name: 'Tyrion Lannister' },
+        { name: 'Cersei Lannister' },
+        { name: 'Jon Snow' },
+        { name: 'Daenerys Targaryen' }
+      ];
+      Character.insertMany(arr, function(err, docs) {
+        assert.ifError(err);
+        assert.equal(docs.length, 4);
+        Character.deleteOne({ name: 'Jon Snow' }, { w: 1 }, function(err) {
+          assert.ifError(err);
+          Character.find({}, function(err, docs) {
+            assert.ifError(err);
+            assert.equal(docs.length, 3);
+            done();
+          });
+        });
       });
     });
 
@@ -5960,15 +6033,10 @@ describe('Model', function() {
           name: { type: String, index: true }
         }, { autoIndex: false }), 'gh6281');
 
-        yield M.db.createCollection('gh6281');
-
-        let indexes = yield M.listIndexes();
-        assert.deepEqual(indexes.map(i => i.key), [{ _id: 1 }]);
-
         let dropped = yield M.syncIndexes();
         assert.deepEqual(dropped, []);
 
-        indexes = yield M.listIndexes();
+        let indexes = yield M.listIndexes();
         assert.deepEqual(indexes.map(i => i.key), [
           { _id: 1 },
           { name: 1 }
@@ -6005,6 +6073,32 @@ describe('Model', function() {
         // Re-run syncIndexes(), shouldn't change anything
         dropped = yield M.syncIndexes();
         assert.deepEqual(dropped, []);
+      });
+    });
+
+    it('syncIndexes() with different key order (gh-8135)', function() {
+      return co(function*() {
+        const opts = { autoIndex: false };
+        let schema = new Schema({ name: String, age: Number }, opts);
+        schema.index({ name: 1, age: -1 });
+        let M = db.model('gh8135', schema, 'gh8135');
+
+        let dropped = yield M.syncIndexes();
+        assert.deepEqual(dropped, []);
+
+        const indexes = yield M.listIndexes();
+        assert.deepEqual(indexes.map(i => i.key), [
+          { _id: 1 },
+          { name: 1, age: -1 }
+        ]);
+
+        // New model, same collection, different key order
+        schema = new Schema({ name: String, age: Number }, opts);
+        schema.index({ age: -1, name: 1 });
+        M = db.model('gh8135_0', schema, 'gh8135');
+
+        dropped = yield M.syncIndexes();
+        assert.deepEqual(dropped, ['name_1_age_-1']);
       });
     });
 
@@ -6310,6 +6404,103 @@ describe('Model', function() {
 
       assert.strictEqual(sessions[2], session);
       assert.strictEqual(sessions[3], session);
+    });
+  });
+
+  it('custom statics that overwrite query functions dont get hooks by default (gh-7790)', function() {
+    return co(function*() {
+      const schema = new Schema({ name: String, loadedAt: Date });
+
+      schema.statics.findOne = function() {
+        return this.findOneAndUpdate({}, { loadedAt: new Date() }, { new: true });
+      };
+
+      let called = 0;
+      schema.pre('findOne', function() {
+        ++called;
+      });
+      const Model = db.model('gh7790', schema);
+
+      yield Model.create({ name: 'foo' });
+
+      const res = yield Model.findOne();
+      assert.ok(res.loadedAt);
+      assert.equal(called, 0);
+    });
+  });
+
+  it('error handling middleware passes saved doc (gh-7832)', function() {
+    const schema = new Schema({ _id: Number });
+
+    const errs = [];
+    const docs = [];
+    schema.post('save', (err, doc, next) => {
+      errs.push(err);
+      docs.push(doc);
+      next();
+    });
+    const Model = db.model('gh7832', schema);
+
+    return co(function*() {
+      yield Model.create({ _id: 1 });
+
+      const doc = new Model({ _id: 1 });
+      const err = yield doc.save().then(() => null, err => err);
+      assert.ok(err);
+      assert.equal(err.code, 11000);
+
+      assert.equal(errs.length, 1);
+      assert.equal(errs[0].code, 11000);
+
+      assert.equal(docs.length, 1);
+      assert.strictEqual(docs[0], doc);
+    });
+  });
+
+  it('throws readable error if calling Model function with bad context (gh-7957)', function() {
+    const Model = db.model('gh7957_new', Schema({ name: String }));
+
+    assert.throws(() => {
+      new Model.discriminator('gh5957_fail', Schema({ doesntMatter: String }));
+    }, /Model\.discriminator.*new Model/);
+
+    const discriminator = Model.discriminator;
+
+    assert.throws(() => {
+      discriminator('gh5957_fail', Schema({ doesntMatter: String }));
+    }, /Model\.discriminator.*MyModel/);
+  });
+
+  describe('exists() (gh-6872)', function() {
+    it('returns true if document exists', function() {
+      const Model = db.model('gh6872_exists', new Schema({ name: String }));
+
+      return Model.create({ name: 'foo' }).
+        then(() => Model.exists({ name: 'foo' })).
+        then(res => assert.strictEqual(res, true)).
+        then(() => Model.exists({})).
+        then(res => assert.strictEqual(res, true)).
+        then(() => Model.exists()).
+        then(res => assert.strictEqual(res, true));
+    });
+
+    it('returns false if no doc exists', function() {
+      const Model = db.model('gh6872_false', new Schema({ name: String }));
+
+      return Model.create({ name: 'foo' }).
+        then(() => Model.exists({ name: 'bar' })).
+        then(res => assert.strictEqual(res, false)).
+        then(() => Model.exists({ otherProp: 'foo' })).
+        then(res => assert.strictEqual(res, false));
+    });
+
+    it('options (gh-8075)', function() {
+      const Model = db.model('gh8075', new Schema({ name: String }));
+
+      return Model.exists({}).
+        then(res => assert.ok(!res)).
+        then(() => Model.exists({}, { explain: true })).
+        then(res => assert.ok(res));
     });
   });
 });

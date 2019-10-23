@@ -4,19 +4,17 @@
  * Module dependencies
  */
 
-const _ = require('lodash');
 const dox = require('dox');
 const fs = require('fs');
 const link = require('../helpers/linktype');
 const hl = require('highlight.js');
-const md = require('markdown');
+const md = require('marked');
 
 const files = [
   'lib/index.js',
   'lib/schema.js',
   'lib/connection.js',
   'lib/document.js',
-  'lib/error/mongooseError.js',
   'lib/model.js',
   'lib/query.js',
   'lib/cursor/QueryCursor.js',
@@ -25,7 +23,16 @@ const files = [
   'lib/schematype.js',
   'lib/virtualtype.js',
   'lib/error/index.js',
-  'lib/types/array.js'
+  'lib/types/core_array.js',
+  'lib/schema/documentarray.js',
+  'lib/schema/SingleNestedPath.js',
+  'lib/options/SchemaTypeOptions.js',
+  'lib/options/SchemaArrayOptions.js',
+  'lib/options/SchemaBufferOptions.js',
+  'lib/options/SchemaDateOptions.js',
+  'lib/options/SchemaNumberOptions.js',
+  'lib/options/SchemaObjectIdOptions.js',
+  'lib/options/SchemaStringOptions.js'
 ];
 
 module.exports = {
@@ -54,6 +61,12 @@ function parse() {
       replace('/index', '');
     const lastSlash = name.lastIndexOf('/');
     name = name.substr(lastSlash === -1 ? 0 : lastSlash + 1);
+    if (name === 'core_array') {
+      name = 'array';
+    }
+    if (name === 'documentarray') {
+      name = 'DocumentArrayPath';
+    }
     const data = {
       name: name.charAt(0).toUpperCase() === name.charAt(0) ? name : name.charAt(0).toUpperCase() + name.substr(1),
       props: []
@@ -80,6 +93,9 @@ function parse() {
             }
             ctx.name = str;
             ctx.string = `${ctx.constructor}.prototype.${ctx.name}`;
+            break;
+          case 'type':
+            ctx.type = Array.isArray(tag.types) ? tag.types.join('|') : tag.types;
             break;
           case 'static':
             ctx.type = 'property';
@@ -128,6 +144,9 @@ function parse() {
               ctx.string += '()';
             }
             break;
+          case 'constructor':
+            ctx.string = tag.string + '()';
+            ctx.name = tag.string;
         }
       }
 
@@ -158,6 +177,10 @@ function parse() {
         return 1;
       }
     });
+
+    if (props.file.startsWith('lib/options')) {
+      data.hideFromNav = true;
+    }
 
     out.push(data);
   }

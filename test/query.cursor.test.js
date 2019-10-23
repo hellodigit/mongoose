@@ -425,7 +425,7 @@ describe('QueryCursor', function() {
     const cursor = User.find().cursor().addCursorFlag('noCursorTimeout', true);
 
     cursor.on('cursor', function() {
-      assert.equal(cursor.cursor.s.cmd.noCursorTimeout, true);
+      assert.equal(cursor.cursor.cursorState.cmd.noCursorTimeout, true);
       done();
     });
   });
@@ -459,5 +459,20 @@ describe('QueryCursor', function() {
         done();
       });
     });
+  });
+
+  it('batchSize option (gh-8039)', function() {
+    const User = db.model('gh8039', Schema({ name: String }));
+    let cursor = User.find().cursor({ batchSize: 2000 });
+
+    return new Promise(resolve => cursor.once('cursor', () => resolve())).
+      then(() => assert.equal(cursor.cursor.cursorState.batchSize, 2000)).
+      then(() => {
+        cursor = User.find().batchSize(2001).cursor();
+      }).
+      then(() => new Promise(resolve => cursor.once('cursor', () => resolve()))).
+      then(() => {
+        assert.equal(cursor.cursor.cursorState.batchSize, 2001);
+      });
   });
 });

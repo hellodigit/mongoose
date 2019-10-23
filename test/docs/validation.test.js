@@ -222,56 +222,37 @@ describe('validation docs', function() {
   /**
    * Custom validators can also be asynchronous. If your validator function
    * returns a promise (like an `async` function), mongoose will wait for that
-   * promise to settle. If you prefer callbacks, set the `isAsync` option,
-   * and mongoose will pass a callback as the 2nd argument to your validator
-   * function.
+   * promise to settle. If the returned promise rejects, or fulfills with
+   * the value `false`, Mongoose will consider that a validation error.
    */
   it('Async Custom Validators', function(done) {
-    var userSchema = new Schema({
+    const userSchema = new Schema({
       name: {
         type: String,
-        // You can also make a validator async by returning a promise. If you
-        // return a promise, do **not** specify the `isAsync` option.
-        validate: function(v) {
-          return new Promise(function(resolve, reject) {
-            setTimeout(function() {
-              resolve(false);
-            }, 5);
-          });
-        }
+        // You can also make a validator async by returning a promise.
+        validate: () => Promise.reject(new Error('Oops!'))
       },
-      phone: {
+      email: {
         type: String,
+        // There are two ways for an promise-based async validator to fail:
+        // 1) If the promise rejects, Mongoose assumes the validator failed with the given error.
+        // 2) If the promise resolves to `false`, Mongoose assumes the validator failed and creates an error with the given `message`.
         validate: {
-          isAsync: true,
-          validator: function(v, cb) {
-            setTimeout(function() {
-              var phoneRegex = /\d{3}-\d{3}-\d{4}/;
-              var msg = v + ' is not a valid phone number!';
-              // First argument is a boolean, whether validator succeeded
-              // 2nd argument is an optional error message override
-              cb(phoneRegex.test(v), msg);
-            }, 5);
-          },
-          // Default error message, overridden by 2nd argument to `cb()` above
-          message: 'Default error message'
-        },
-        required: [true, 'User phone number required']
+          validator: () => Promise.resolve(false),
+          message: 'Email validation failed'
+        }
       }
     });
 
-    var User = db.model('User', userSchema);
-    var user = new User();
-    var error;
+    const User = db.model('User', userSchema);
+    const user = new User();
 
-    user.phone = '555.0123';
+    user.email = 'test@test.co';
     user.name = 'test';
-    user.validate(function(error) {
+    user.validate().catch(error => {
       assert.ok(error);
-      assert.equal(error.errors['phone'].message,
-        '555.0123 is not a valid phone number!');
-      assert.equal(error.errors['name'].message,
-        'Validator failed for path `name` with value `test`');
+      assert.equal(error.errors['name'].message, 'Oops!');
+      assert.equal(error.errors['email'].message, 'Email validation failed');
       // acquit:ignore:start
       done();
       // acquit:ignore:end
@@ -409,13 +390,17 @@ describe('validation docs', function() {
 
   /**
    * In the above examples, you learned about document validation. Mongoose also
-   * supports validation for `update()` and `findOneAndUpdate()` operations.
+   * supports validation for [`update()`](/docs/api.html#query_Query-update),
+   * [`updateOne()`](/docs/api.html#query_Query-updateOne),
+   * [`updateMany()`](/docs/api.html#query_Query-updateMany),
+   * and [`findOneAndUpdate()`](/docs/api.html#query_Query-findOneAndUpdate) operations.
    * Update validators are off by default - you need to specify
    * the `runValidators` option.
    *
    * To turn on update validators, set the `runValidators` option for
-   * `update()` or `findOneAndUpdate()`. Be careful: update validators
-   * are off by default because they have several caveats.
+   * `update()`, `updateOne()`, `updateMany()`, or `findOneAndUpdate()`.
+   * Be careful: update validators are off by default because they have several
+   * caveats.
    */
   it('Update Validators', function(done) {
     var toySchema = new Schema({
@@ -426,11 +411,11 @@ describe('validation docs', function() {
     var Toy = db.model('Toys', toySchema);
 
     Toy.schema.path('color').validate(function (value) {
-      return /blue|green|white|red|orange|periwinkle/i.test(value);
+      return /red|green|blue/i.test(value);
     }, 'Invalid color');
 
     var opts = { runValidators: true };
-    Toy.updateOne({}, { color: 'bacon' }, opts, function (err) {
+    Toy.updateOne({}, { color: 'not a color' }, opts, function (err) {
       assert.equal(err.errors.color.message,
         'Invalid color');
       // acquit:ignore:start

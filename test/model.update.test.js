@@ -3245,4 +3245,141 @@ describe('model: updateOne: ', function() {
       assert.ok(doc.child.updatedAt.valueOf() >= now);
     });
   });
+
+  it('supports discriminators if key is specified in conditions (gh-7843)', function() {
+    const testSchema = new mongoose.Schema({
+      title: { type: String, required: true },
+      kind: { type: String, required: true }
+    }, { discriminatorKey: 'kind' });
+
+    const Test = db.model('gh7843', testSchema);
+
+    const testSchemaChild = new mongoose.Schema({
+      label: String
+    });
+
+    Test.discriminator('gh7843_child', testSchemaChild, 'testchild');
+
+    const filter = { label: 'bar', kind: 'testchild' };
+    const update = { label: 'updated' };
+    return Test.create({ title: 'foo', kind: 'testchild', label: 'bar' }).
+      then(() => Test.updateOne(filter, update)).
+      then(() => Test.collection.findOne()).
+      then(doc => assert.equal(doc.label, 'updated'));
+  });
+
+  it('immutable createdAt (gh-7917)', function() {
+    const start = new Date().valueOf();
+    const schema = Schema({
+      createdAt: {
+        type: mongoose.Schema.Types.Date,
+        immutable: true
+      },
+      name: String
+    }, { timestamps: true });
+
+    const Model = db.model('gh7917', schema);
+
+    return co(function*() {
+      yield Model.updateOne({}, { name: 'foo' }, { upsert: true });
+
+      const doc = yield Model.collection.findOne();
+      assert.ok(doc.createdAt.valueOf() >= start);
+    });
+  });
+
+  it('conditional immutable (gh-8001)', function() {
+    const schema = Schema({
+      test: {
+        type: String,
+        immutable: ctx => {
+          return ctx.getQuery().name != null;
+        }
+      },
+      name: String
+    }, { timestamps: true });
+
+    const Model = db.model('gh8001', schema);
+
+    return co(function*() {
+      yield Model.updateOne({}, { test: 'before', name: 'foo' }, { upsert: true });
+      let doc = yield Model.collection.findOne();
+      assert.equal(doc.test, 'before');
+
+      yield Model.updateOne({ name: 'foo' }, { test: 'after' }, { upsert: true });
+      doc = yield Model.collection.findOne();
+      assert.equal(doc.test, 'before');
+
+      yield Model.updateOne({}, { test: 'after' }, { upsert: true });
+      doc = yield Model.collection.findOne();
+      assert.equal(doc.test, 'after');
+    });
+  });
+
+  it('allow $pull with non-existent schema field (gh-8166)', function() {
+    const Model = db.model('gh8166', Schema({
+      name: String,
+      arr: [{
+        status: String,
+        values: [{ text: String }]
+      }]
+    }));
+
+    return co(function*() {
+      yield Model.collection.insertMany([
+        {
+          name: 'a',
+          arr: [{ values: [{ text: '123' }] }]
+        },
+        {
+          name: 'b',
+          arr: [{ values: [{ text: '123', coords: 'test' }] }]
+        }
+      ]);
+
+      yield Model.updateMany({}, {
+        $pull: { arr: { 'values.0.coords': { $exists: false } } }
+      });
+
+      const docs = yield Model.find().sort({ name: 1 });
+      assert.equal(docs[0].name, 'a');
+      assert.equal(docs[0].arr.length, 0);
+      assert.equal(docs[1].name, 'b');
+      assert.equal(docs[1].arr.length, 1);
+    });
+  });
+
+  it('update embedded discriminator path if key in $elemMatch (gh-8063)', function() {
+    const slideSchema = new Schema({
+      type: { type: String },
+      commonField: String
+    }, { discriminatorKey: 'type' });
+    const schema = new Schema({ slides: [slideSchema] });
+
+    const slidesSchema = schema.path('slides');
+    slidesSchema.discriminator('typeA', new Schema({ a: String }));
+    slidesSchema.discriminator('typeB', new Schema({ b: String }));
+
+    const MyModel = db.model('gh8063', schema);
+    return co(function*() {
+      const doc = yield MyModel.create({
+        slides: [{ type: 'typeA', a: 'oldValue1', commonField: 'oldValue2' }]
+      });
+
+      const filter = {
+        slides: { $elemMatch: { _id: doc.slides[0]._id, type: 'typeA' } }
+      };
+      const update = {
+        'slides.$.a': 'newValue1',
+        'slides.$.commonField': 'newValue2'
+      };
+      yield MyModel.updateOne(filter, update);
+
+      const updatedDoc = yield MyModel.findOne();
+      assert.equal(updatedDoc.slides.length, 1);
+      assert.equal(updatedDoc.slides[0].type, 'typeA');
+      assert.equal(updatedDoc.slides[0].a, 'newValue1');
+      assert.equal(updatedDoc.slides[0].commonField, 'newValue2');
+    });
+  });
 });

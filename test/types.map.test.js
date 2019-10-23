@@ -371,7 +371,7 @@ describe('Map', function() {
       });
     });
 
-    it('avoid populating as map if populate on obj (gh-6460)', function() {
+    it('avoid populating as map if populate on obj (gh-6460) (gh-8157)', function() {
       const UserSchema = new mongoose.Schema({
         apiKeys: {}
       });
@@ -387,8 +387,12 @@ describe('Map', function() {
 
         const doc = yield User.create({ apiKeys: { github: key._id, twitter: key2._id } });
 
-        const populated = yield User.findById(doc).populate('apiKeys');
+        const populated = yield User.findById(doc).populate({
+          path: 'apiKeys',
+          skipInvalidIds: true
+        });
         assert.ok(!(populated.apiKeys instanceof Map));
+        assert.ok(!Array.isArray(populated.apiKeys));
       });
     });
 
@@ -715,5 +719,24 @@ describe('Map', function() {
       then(() => {
         assert.deepEqual(calls, ['myMap.foo', 'myMap.foo']);
       });
+  });
+
+  it('treats `of` as a schema if typeKey is not set (gh-7859)', function() {
+    const schema = new mongoose.Schema({
+      myMap: {
+        type: Map,
+        of: {
+          test: { type: String, required: true }
+        }
+      }
+    });
+    const Model = db.model('gh7859', schema);
+
+    const doc = new Model({ myMap: { foo: {} } });
+
+    const err = doc.validateSync();
+    assert.ok(err);
+    assert.ok(err.errors['myMap.foo.test'].message.indexOf('required') !== -1,
+      err.errors['myMap.foo.test'].message);
   });
 });

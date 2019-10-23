@@ -1,7 +1,6 @@
 'use strict';
 
 var assert = require('assert');
-var async = require('async');
 var mongoose = require('../../');
 
 var Schema = mongoose.Schema;
@@ -90,21 +89,14 @@ describe('discriminator docs', function () {
       });
     };
 
-    async.map([event1, event2, event3], save, function (error) {
-      // acquit:ignore:start
-      assert.ifError(error);
-      // acquit:ignore:end
-
-      Event.countDocuments({}, function (error, count) {
-        // acquit:ignore:start
-        assert.ifError(error);
-        // acquit:ignore:end
+    Promise.all([event1.save(), event2.save(), event3.save()]).
+      then(() => Event.countDocuments()).
+      then(count => {
         assert.equal(count, 3);
         // acquit:ignore:start
         done();
         // acquit:ignore:end
       });
-    });
   });
 
   /**
@@ -138,21 +130,9 @@ describe('discriminator docs', function () {
     var event2 = new ClickedLinkEvent({time: Date.now(), url: 'google.com'});
     var event3 = new SignedUpEvent({time: Date.now(), user: 'testuser'});
 
-    var save = function (doc, callback) {
-      doc.save(function (error, doc) {
-        callback(error, doc);
-      });
-    };
-
-    async.map([event1, event2, event3], save, function (error) {
-      // acquit:ignore:start
-      assert.ifError(error);
-      // acquit:ignore:end
-
-      ClickedLinkEvent.find({}, function (error, docs) {
-        // acquit:ignore:start
-        assert.ifError(error);
-        // acquit:ignore:end
+    Promise.all([event1.save(), event2.save(), event3.save()]).
+      then(() => ClickedLinkEvent.find({})).
+      then(docs => {
         assert.equal(docs.length, 1);
         assert.equal(docs[0]._id.toString(), event2._id.toString());
         assert.equal(docs[0].url, 'google.com');
@@ -160,7 +140,6 @@ describe('discriminator docs', function () {
         done();
         // acquit:ignore:end
       });
-    });
   });
 
   /**
@@ -408,5 +387,37 @@ describe('discriminator docs', function () {
         done();
       }).
       catch(done);
+  });
+
+  /**
+   * You can also define discriminators on single nested subdocuments, similar
+   * to how you can define discriminators on arrays of subdocuments.
+   *
+   * As a general best practice, make sure you declare any hooks on your
+   * schemas **before** you use them. You should **not** call `pre()` or
+   * `post()` after calling `discriminator()`
+   */
+  it('Single nested discriminators', function() {
+    const shapeSchema = Schema({ name: String }, { discriminatorKey: 'kind' });
+    const schema = Schema({ shape: shapeSchema });
+
+    schema.path('shape').discriminator('Circle', Schema({ radius: String }));
+    schema.path('shape').discriminator('Square', Schema({ side: Number }));
+
+    const MyModel = mongoose.model('ShapeTest', schema);
+
+    // If `kind` is set to 'Circle', then `shape` will have a `radius` property
+    let doc = new MyModel({ shape: { kind: 'Circle', radius: 5 } });
+    doc.shape.radius; // 5
+    // acquit:ignore:start
+    assert.equal(doc.shape.radius, 5);
+    // acquit:ignore:end
+
+    // If `kind` is set to 'Square', then `shape` will have a `side` property
+    doc = new MyModel({ shape: { kind: 'Square', side: 10 } });
+    doc.shape.side; // 10
+    // acquit:ignore:start
+    assert.equal(doc.shape.side, 10);
+    // acquit:ignore:end
   });
 });

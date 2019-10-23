@@ -1028,6 +1028,26 @@ describe('aggregate: ', function() {
         });
       });
 
+      it('adding to pipeline in pre (gh-8017)', function() {
+        const s = new Schema({ name: String });
+
+        s.pre('aggregate', function(next) {
+          this.append({ $limit: 1 });
+          next();
+        });
+
+        const M = db.model('gh8017', s);
+
+        return co(function*() {
+          yield M.create([{ name: 'alpha' }, { name: 'Zeta' }]);
+
+          const docs = yield M.aggregate([{ $sort: { name: 1 } }]);
+
+          assert.equal(docs.length, 1);
+          assert.equal(docs[0].name, 'Zeta');
+        });
+      });
+
       it('post', function(done) {
         const s = new Schema({ name: String });
 
@@ -1268,10 +1288,10 @@ describe('aggregate: ', function() {
         return MyModel.aggregate([{ $sort: { name: 1 } }]).
           cursor().
           exec().
-          eachAsync(checkDoc, { parallel: 2}).then(function() {
+          eachAsync(checkDoc, { parallel: 2 }).then(function() {
             assert.ok(Date.now() - startedAt[1] >= 100);
             assert.equal(startedAt.length, 2);
-            assert.ok(startedAt[1] - startedAt[0] < 50);
+            assert.ok(startedAt[1] - startedAt[0] < 50, `${startedAt[1] - startedAt[0]}`);
             assert.deepEqual(names.sort(), expectedNames);
             done();
           });
@@ -1291,7 +1311,7 @@ describe('aggregate: ', function() {
       exec();
 
     cursor.once('cursor', cursor => {
-      assert.ok(cursor.s.cmd.noCursorTimeout);
+      assert.ok(cursor.cursorState.cmd.noCursorTimeout);
       done();
     });
   });

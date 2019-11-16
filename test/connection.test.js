@@ -4,12 +4,13 @@
  * Module dependencies.
  */
 
+const start = require('./common');
+
 const Promise = require('bluebird');
 const Q = require('q');
 const assert = require('assert');
 const co = require('co');
 const server = require('./common').server;
-const start = require('./common');
 
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
@@ -188,7 +189,7 @@ describe('connections:', function() {
         let numReconnected = 0;
         let numReconnect = 0;
         let numClose = 0;
-        const conn = mongoose.createConnection('mongodb://localhost:27000/mongoosetest', {
+        const conn = mongoose.createConnection('mongodb://localhost:27000/mongoosetest?heartbeatfrequencyms=1000', {
           useNewUrlParser: true,
           useUnifiedTopology: true
         });
@@ -259,7 +260,7 @@ describe('connections:', function() {
           reconnectTries: 3,
           reconnectInterval: 100,
           useNewUrlParser: true,
-          useUnifiedTopology: true
+          useUnifiedTopology: false // reconnectFailed doesn't get emitted with 'useUnifiedTopology'
         });
 
         conn.on('connected', function() {
